@@ -2,7 +2,7 @@ use derive_setters::Setters;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 
-use crate::{
+use crate::discord::{
     channel::{Channel, ChannelResource},
     message::{CreateMessage, Message},
     request::{Client, Request, Result},
@@ -12,8 +12,7 @@ use crate::{
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
 pub struct User {
-    id: Snowflake<User>,
-
+    pub id: Snowflake<User>,
     pub username: String,
 }
 
@@ -41,7 +40,7 @@ pub trait UserResource {
     }
 
     async fn create_dm(&self, client: &impl Client) -> Result<Channel> {
-        client.request(self.create_dm_request()).await
+        client.request(&self.create_dm_request()).await
     }
 
     async fn send_message(

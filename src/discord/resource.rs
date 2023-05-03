@@ -2,7 +2,7 @@ use std::{any::type_name, fmt, marker::PhantomData, num::ParseIntError};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::request::{Client, Request, Result};
+use crate::discord::request::{Client, Request, Result};
 
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
@@ -65,7 +65,7 @@ where
     }
 
     async fn get(&self, client: &impl Client) -> Result<T> {
-        client.request(self.get_request()).await
+        client.request(&self.get_request()).await
     }
 }
 
@@ -81,7 +81,7 @@ where
     }
 
     async fn patch(&self, client: &impl Client, f: impl FnOnce(&mut B) -> &mut B) -> Result<T> {
-        client.request(self.patch_request(f)).await
+        client.request(&self.patch_request(f)).await
     }
 }
 
@@ -114,6 +114,6 @@ where
     }
 
     async fn delete(self, client: &impl Client) -> Result<()> {
-        client.request(self.delete_request()).await
+        client.request(&self.delete_request()).await
     }
 }

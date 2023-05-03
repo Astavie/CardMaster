@@ -71,6 +71,17 @@ impl<T> Request<T> {
 }
 
 pub trait Client: Clone + Send {
-    async fn token(&self) -> String;
-    async fn request<T: DeserializeOwned + Unpin>(&self, request: Request<T>) -> Result<T>;
+    async fn token(&self) -> &str;
+    async fn request_weak<T: DeserializeOwned + Unpin>(&self, request: &Request<T>) -> Result<T>;
+
+    async fn request<T: DeserializeOwned + Unpin>(&self, request: &Request<T>) -> Result<T> {
+        match self.request_weak(request).await {
+            Err(RequestError::RateLimited) => self.request_weak(request).await,
+            Err(RequestError::Network) => {
+                // TODO: retry
+                todo!("network error");
+            }
+            r => r,
+        }
+    }
 }

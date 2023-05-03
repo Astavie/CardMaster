@@ -18,11 +18,11 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::{
+use crate::discord::{
     interaction::Interaction,
     request::{self, Client, Request, RequestError},
-    NAME,
 };
+use crate::NAME;
 
 struct GatewayState {
     interval: Interval,
@@ -215,7 +215,7 @@ impl Stream for Gateway {
 
 impl Gateway {
     pub async fn connect(client: &impl Client) -> request::Result<Self> {
-        let GatewayResponse { url } = client.request(Request::get("/gateway".to_owned())).await?;
+        let GatewayResponse { url } = client.request(&Request::get("/gateway".to_owned())).await?;
         let full_url = url + "/?v=10&encoding=json";
 
         let (mut ws_stream, _) = connect_async(full_url).await.expect("could not connect");
@@ -227,7 +227,7 @@ impl Gateway {
             .into_text()
             .expect("not utf8");
 
-        let GatewayMessage::<Hello> {
+        let GatewayMessage {
             d: Hello { heartbeat_interval },
             op: _,
             s: _,
@@ -237,7 +237,7 @@ impl Gateway {
         let identify = serde_json::to_string(&GatewayMessage {
             op: GatewayOpcode::Identify,
             d: Identify {
-                token: client.token().await,
+                token: client.token().await.to_owned(),
                 intents: 0,
                 properties: ConnectionProperties {
                     os: "linux".to_owned(),

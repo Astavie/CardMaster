@@ -1,12 +1,12 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::resource::{Resource, Snowflake};
+use crate::discord::resource::{Resource, Snowflake};
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
 pub struct Guild {
-    id: Snowflake<Guild>,
+    pub id: Snowflake<Guild>,
 }
 
 pub trait GuildResource {

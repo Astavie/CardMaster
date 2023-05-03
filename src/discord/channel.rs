@@ -1,7 +1,7 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::{
+use crate::discord::{
     message::{CreateMessage, Message, MessageIdentifier},
     request::{Client, Request, Result},
     resource::{Resource, Snowflake},
@@ -10,7 +10,7 @@ use crate::{
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
 pub struct Channel {
-    id: Snowflake<Channel>,
+    pub id: Snowflake<Channel>,
 }
 
 pub trait ChannelResource {
@@ -30,7 +30,7 @@ pub trait ChannelResource {
         client: &impl Client,
         f: impl FnOnce(&mut CreateMessage) -> &mut CreateMessage,
     ) -> Result<Message> {
-        client.request(self.send_message_request(f)).await
+        client.request(&self.send_message_request(f)).await
     }
 
     fn message_from_id(&self, message_id: u64) -> MessageIdentifier {

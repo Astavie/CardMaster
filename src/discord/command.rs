@@ -2,7 +2,7 @@ use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::{
+use crate::discord::{
     application::Application,
     guild::Guild,
     request::{Client, Request, Result},
@@ -60,7 +60,7 @@ pub struct CommandIdentifier {
 #[derive(Debug, Deserialize)]
 pub struct Command {
     #[serde(flatten)]
-    id: CommandIdentifier,
+    pub id: CommandIdentifier,
     #[serde(flatten)]
     pub data: CommandData,
 }
@@ -72,6 +72,13 @@ impl Commands {
             guild_id: guild,
         }
     }
+    pub(crate) fn command_from_id(&self, id: Snowflake<Command>) -> CommandIdentifier {
+        CommandIdentifier {
+            command_pool: self.clone(),
+            command_id: id,
+        }
+    }
+
     fn uri(&self) -> String {
         if let Some(guild) = self.guild_id {
             format!(
@@ -87,14 +94,14 @@ impl Commands {
         Request::post(self.uri(), command)
     }
     pub async fn create(&self, client: &impl Client, command: &CommandData) -> Result<Command> {
-        client.request(self.create_request(command)).await
+        client.request(&self.create_request(command)).await
     }
 
     pub fn all_request(&self) -> Request<Vec<Command>> {
         Request::get(self.uri())
     }
     pub async fn all(&self, client: &impl Client) -> Result<Vec<Command>> {
-        client.request(self.all_request()).await
+        client.request(&self.all_request()).await
     }
 }
 

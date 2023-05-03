@@ -2,7 +2,7 @@ use derive_setters::Setters;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 
-use crate::{
+use crate::discord::{
     channel::Channel,
     resource::{Deletable, Patchable, Resource, Snowflake},
     user::PartialUser,
@@ -29,7 +29,7 @@ impl MessageIdentifier {
 #[derive(Debug, Deserialize)]
 pub struct Message {
     #[serde(flatten)]
-    id: MessageIdentifier,
+    pub id: MessageIdentifier,
 
     pub author: PartialUser,
     pub content: String,
