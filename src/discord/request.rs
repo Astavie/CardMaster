@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use async_trait::async_trait;
 use isahc::http::{Method, StatusCode};
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -60,6 +61,7 @@ impl<T> Request<T> {
             body: Some(serde_json::to_string(body).unwrap()),
         }
     }
+
     pub fn delete(uri: String) -> Self {
         Request {
             phantom: PhantomData,
@@ -70,13 +72,20 @@ impl<T> Request<T> {
     }
 }
 
-pub trait Client: Clone + Send {
+#[async_trait]
+pub trait Client: Clone + Send + Sync {
     async fn token(&self) -> &str;
-    async fn request_weak<T: DeserializeOwned + Unpin>(&self, request: &Request<T>) -> Result<T>;
+    async fn request_weak<T: DeserializeOwned + Unpin + Send + Sync>(
+        &self,
+        request: &Request<T>,
+    ) -> Result<T>;
 
-    async fn request<T: DeserializeOwned + Unpin>(&self, request: &Request<T>) -> Result<T> {
-        match self.request_weak(request).await {
-            Err(RequestError::RateLimited) => self.request_weak(request).await,
+    async fn request<T: DeserializeOwned + Unpin + Send + Sync>(
+        &self,
+        request: Request<T>,
+    ) -> Result<T> {
+        match self.request_weak(&request).await {
+            Err(RequestError::RateLimited) => self.request_weak(&request).await,
             Err(RequestError::Network) => {
                 // TODO: retry
                 todo!("network error");

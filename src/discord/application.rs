@@ -30,7 +30,7 @@ impl Application {
         Request::get("/oauth2/applications/@me".to_owned())
     }
     pub async fn get(client: &impl Client) -> Result<Self> {
-        client.request(&Self::get_request()).await
+        client.request(Self::get_request()).await
     }
 }
 

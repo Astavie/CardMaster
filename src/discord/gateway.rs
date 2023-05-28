@@ -18,11 +18,9 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::discord::{
-    interaction::Interaction,
-    request::{self, Client, Request, RequestError},
-};
-use crate::NAME;
+use crate::discord::request::{self, Client, Request, RequestError};
+
+use super::{interaction::AnyInteraction, NAME};
 
 struct GatewayState {
     interval: Interval,
@@ -163,7 +161,7 @@ struct GatewayMessage<T> {
 #[serde(tag = "t", content = "d", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum GatewayEvent {
     Ready(Ready),
-    InteractionCreate(Interaction),
+    InteractionCreate(AnyInteraction),
 }
 
 #[derive(Deserialize, Debug)]
@@ -215,7 +213,7 @@ impl Stream for Gateway {
 
 impl Gateway {
     pub async fn connect(client: &impl Client) -> request::Result<Self> {
-        let GatewayResponse { url } = client.request(&Request::get("/gateway".to_owned())).await?;
+        let GatewayResponse { url } = client.request(Request::get("/gateway".to_owned())).await?;
         let full_url = url + "/?v=10&encoding=json";
 
         let (mut ws_stream, _) = connect_async(full_url).await.expect("could not connect");

@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use derive_setters::Setters;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -6,27 +7,31 @@ use super::{
     application::Application,
     channel::Channel,
     command::CommandIdentifier,
-    message::Message,
+    message::{Message, PatchMessage},
     request::{Client, Request, Result},
-    resource::Snowflake,
+    resource::{Deletable, Patchable, Resource, Snowflake},
     user::User,
 };
 
+#[derive(Debug)]
+pub enum AnyInteraction {
+    Command(Interaction<ApplicationCommand>),
+    Component(Interaction<MessageComponent>),
+}
+
 #[derive(Debug, Deserialize)]
-pub struct Interaction {
-    #[serde(flatten)]
-    pub data: InteractionData,
+pub struct Interaction<T> {
+    pub data: T,
 
     #[serde(flatten)]
-    pub token: InteractionToken,
+    pub token: InteractionToken<T>,
 
-    pub user: User,
     pub channel_id: Snowflake<Channel>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct InteractionToken {
-    id: Snowflake<Interaction>,
+pub struct InteractionToken<T> {
+    id: Snowflake<Interaction<T>>,
     token: String,
     application_id: Snowflake<Application>,
 }
@@ -44,10 +49,14 @@ struct Response<T> {
     data: T,
 }
 
-pub trait InteractionResource {
-    fn token(&self) -> &InteractionToken;
+#[async_trait]
+pub trait InteractionResource<T> {
+    fn token(&self) -> &InteractionToken<T>;
 
-    fn reply_request(&self, f: impl FnOnce(&mut CreateReply) -> &mut CreateReply) -> Request<()> {
+    fn reply_request(
+        &self,
+        f: impl for<'a> FnOnce(&'a mut CreateReply) -> &'a mut CreateReply,
+    ) -> Request<()> {
         let mut reply = CreateReply::default();
         f(&mut reply);
 
@@ -63,31 +72,56 @@ pub trait InteractionResource {
     async fn reply(
         &self,
         client: &impl Client,
-        f: impl FnOnce(&mut CreateReply) -> &mut CreateReply,
-    ) -> Result<()> {
-        client.request(&self.reply_request(f)).await
+        f: impl for<'a> FnOnce(&'a mut CreateReply) -> &'a mut CreateReply + Send,
+    ) -> Result<InteractionResponseIdentifier> {
+        client.request(self.reply_request(f)).await?;
+
+        let token = self.token();
+        Ok(InteractionResponseIdentifier {
+            application_id: token.application_id,
+            token: token.token.clone(),
+            message: None,
+        })
     }
 }
 
-impl InteractionResource for InteractionToken {
-    fn token(&self) -> &InteractionToken {
+pub struct InteractionResponseIdentifier {
+    application_id: Snowflake<Application>,
+    token: String,
+    message: Option<Snowflake<Message>>,
+}
+
+impl Resource<Message> for InteractionResponseIdentifier {
+    fn uri(&self) -> String {
+        let id = self
+            .message
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "@original".to_owned());
+
+        format!(
+            "/webhooks/{}/{}/messages/{}",
+            self.application_id, self.token, id
+        )
+    }
+}
+
+impl Patchable<Message, PatchMessage> for InteractionResponseIdentifier {}
+impl Deletable<Message> for InteractionResponseIdentifier {}
+
+impl<T> InteractionResource<T> for InteractionToken<T> {
+    fn token(&self) -> &InteractionToken<T> {
         self
     }
 }
 
-impl InteractionResource for Interaction {
-    fn token(&self) -> &InteractionToken {
+impl<T> InteractionResource<T> for Interaction<T> {
+    fn token(&self) -> &InteractionToken<T> {
         &self.token
     }
 }
 
-#[derive(Debug)]
-pub enum InteractionData {
-    ApplicationCommand(ApplicationCommand),
-    MessageComponent(MessageComponent),
-}
-
-impl<'de> Deserialize<'de> for InteractionData {
+impl<'de> Deserialize<'de> for AnyInteraction {
     fn deserialize<D>(d: D) -> ::std::result::Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -106,15 +140,11 @@ impl<'de> Deserialize<'de> for InteractionData {
         Ok(match typ {
             2 => {
                 data.insert("application_id".to_owned(), app_id.unwrap());
-
-                let data = value.get("data").unwrap();
-                InteractionData::ApplicationCommand(ApplicationCommand::deserialize(data).unwrap())
+                AnyInteraction::Command(Interaction::deserialize(value).unwrap())
             }
             3 => {
                 data.insert("message".to_owned(), message.unwrap().clone());
-
-                let data = value.get("data").unwrap();
-                InteractionData::MessageComponent(MessageComponent::deserialize(data).unwrap())
+                AnyInteraction::Component(Interaction::deserialize(value).unwrap())
             }
             _ => panic!("unsupported type {:?}", typ),
         })
@@ -202,5 +232,7 @@ pub struct SelectValue {
 pub struct MessageComponent {
     pub custom_id: String,
     pub message: Message,
-    pub values: Option<Vec<SelectValue>>,
+
+    #[serde(default)]
+    pub values: Vec<SelectValue>,
 }

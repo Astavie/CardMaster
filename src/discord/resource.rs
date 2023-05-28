@@ -1,5 +1,6 @@
 use std::{any::type_name, fmt, marker::PhantomData, num::ParseIntError};
 
+use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::discord::request::{Client, Request, Result};
@@ -9,6 +10,20 @@ use crate::discord::request::{Client, Request, Result};
 pub struct Snowflake<T> {
     phantom: PhantomData<T>,
     id: u64,
+}
+
+impl<T> PartialEq for Snowflake<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+impl<T> Eq for Snowflake<T> {}
+
+impl<T> std::hash::Hash for Snowflake<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state)
+    }
 }
 
 impl<T> Clone for Snowflake<T> {
@@ -54,9 +69,10 @@ impl<T> fmt::Display for Snowflake<T> {
     }
 }
 
+#[async_trait]
 pub trait Resource<T>
 where
-    T: DeserializeOwned + Unpin,
+    T: DeserializeOwned + Unpin + Send + Sync,
 {
     fn uri(&self) -> String;
 
@@ -65,13 +81,14 @@ where
     }
 
     async fn get(&self, client: &impl Client) -> Result<T> {
-        client.request(&self.get_request()).await
+        client.request(self.get_request()).await
     }
 }
 
+#[async_trait]
 pub trait Patchable<T, B>: Resource<T>
 where
-    T: DeserializeOwned + Unpin,
+    T: DeserializeOwned + Unpin + Send + Sync,
     B: Default + Serialize,
 {
     fn patch_request(&self, f: impl FnOnce(&mut B) -> &mut B) -> Request<T> {
@@ -80,40 +97,55 @@ where
         Request::patch(self.uri(), &builder)
     }
 
-    async fn patch(&self, client: &impl Client, f: impl FnOnce(&mut B) -> &mut B) -> Result<T> {
-        client.request(&self.patch_request(f)).await
+    async fn patch(
+        &self,
+        client: &impl Client,
+        f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
+    ) -> Result<T> {
+        client.request(self.patch_request(f)).await
     }
 }
 
+#[async_trait]
 pub trait Editable<T, B>: Patchable<T, B>
 where
-    T: DeserializeOwned + Unpin,
+    T: DeserializeOwned + Unpin + Send + Sync,
     B: Default + Serialize,
 {
-    async fn edit(&mut self, client: &impl Client, f: impl FnOnce(&mut B) -> &mut B) -> Result<()>;
+    async fn edit(
+        &mut self,
+        client: &impl Client,
+        f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
+    ) -> Result<()>;
 }
 
+#[async_trait]
 impl<S, T, B> Editable<T, B> for S
 where
-    S: Patchable<T, B>,
-    T: DeserializeOwned + Unpin + Into<Self>,
+    S: Patchable<T, B> + Send + Sync,
+    T: DeserializeOwned + Unpin + Send + Sync + Into<Self>,
     B: Default + Serialize,
 {
-    async fn edit(&mut self, client: &impl Client, f: impl FnOnce(&mut B) -> &mut B) -> Result<()> {
+    async fn edit(
+        &mut self,
+        client: &impl Client,
+        f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
+    ) -> Result<()> {
         *self = self.patch(client, f).await?.into();
         Ok(())
     }
 }
 
+#[async_trait]
 pub trait Deletable<T>: Resource<T> + Sized
 where
-    T: DeserializeOwned + Unpin,
+    T: DeserializeOwned + Unpin + Send + Sync,
 {
     fn delete_request(self) -> Request<()> {
         Request::delete(self.uri())
     }
 
     async fn delete(self, client: &impl Client) -> Result<()> {
-        client.request(&self.delete_request()).await
+        client.request(self.delete_request()).await
     }
 }

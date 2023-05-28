@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use derive_setters::Setters;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,7 @@ struct DMRequest {
     recipient_id: Snowflake<User>,
 }
 
+#[async_trait]
 pub trait UserResource {
     fn endpoint(&self) -> Snowflake<User>;
 
@@ -40,13 +42,13 @@ pub trait UserResource {
     }
 
     async fn create_dm(&self, client: &impl Client) -> Result<Channel> {
-        client.request(&self.create_dm_request()).await
+        client.request(self.create_dm_request()).await
     }
 
     async fn send_message(
         &self,
         client: &impl Client,
-        f: impl FnOnce(&mut CreateMessage) -> &mut CreateMessage,
+        f: impl for<'a> FnOnce(&'a mut CreateMessage) -> &'a mut CreateMessage + Send,
     ) -> Result<Message> {
         let channel = self.create_dm(client).await?;
         channel.send_message(client, f).await
