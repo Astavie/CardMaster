@@ -8,7 +8,7 @@ use super::{
     channel::Channel,
     command::CommandIdentifier,
     message::{Message, PatchMessage},
-    request::{Client, Request, Result},
+    request::{Discord, Request, Result},
     resource::{Deletable, Patchable, Resource, Snowflake},
     user::User,
 };
@@ -71,7 +71,7 @@ pub trait InteractionResource<T> {
     }
     async fn reply(
         &self,
-        client: &impl Client,
+        client: &Discord,
         f: impl for<'a> FnOnce(&'a mut CreateReply) -> &'a mut CreateReply + Send,
     ) -> Result<InteractionResponseIdentifier> {
         client.request(self.reply_request(f)).await?;

@@ -8,7 +8,7 @@ edition = "2021"
 [dependencies]
 derive_setters = "0.1.5"
 isahc = { version = "1.7.2", features = ["serde_json", "json"] }
-serde = { version = "1.0.160", features = ["derive"] }
+serde = { version = "1.0.126", features = ["derive"] }
 serde_json = "1.0.96"
 tokio = { version = "1.27.0", features = ["full"] }
 partial_id = { path = "partial_id" }
@@ -20,3 +20,6 @@ rand = "0.8.5"
 tokio-stream = "0.1.14"
 dotenv_codegen = "0.15.0"
 async-trait = "0.1.68"
+
+[patch.crates-io]
+serde = { git = "https://github.com/AmaranthineCodices/serde.git", branch = "integer-tags-for-enums" }

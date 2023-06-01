@@ -9,7 +9,7 @@ use crate::discord::{
     user::PartialUser,
 };
 
-use super::request::{Client, Request, Result};
+use super::request::{Discord, Request, Result};
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub struct MessageIdentifier {
@@ -70,7 +70,7 @@ pub trait MessageResource {
             &CreateThread { name },
         )
     }
-    async fn start_thread(&self, client: &impl Client, name: String) -> Result<Channel> {
+    async fn start_thread(&self, client: &Discord, name: String) -> Result<Channel> {
         client.request(self.start_thread_request(name)).await
     }
 }

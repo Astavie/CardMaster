@@ -4,9 +4,11 @@ use serde::Deserialize;
 use crate::discord::{
     command::Commands,
     guild::GuildResource,
-    request::{Client, Request, Result},
+    request::{Request, Result},
     resource::Snowflake,
 };
+
+use super::request::Discord;
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
@@ -29,7 +31,7 @@ impl Application {
     pub fn get_request() -> Request<Self> {
         Request::get("/oauth2/applications/@me".to_owned())
     }
-    pub async fn get(client: &impl Client) -> Result<Self> {
+    pub async fn get(client: &Discord) -> Result<Self> {
         client.request(Self::get_request()).await
     }
 }

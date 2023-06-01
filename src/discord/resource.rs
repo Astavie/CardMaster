@@ -3,7 +3,9 @@ use std::{any::type_name, fmt, marker::PhantomData, num::ParseIntError};
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::discord::request::{Client, Request, Result};
+use crate::discord::request::{Request, Result};
+
+use super::request::Discord;
 
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
@@ -80,7 +82,7 @@ where
         Request::get(self.uri())
     }
 
-    async fn get(&self, client: &impl Client) -> Result<T> {
+    async fn get(&self, client: &Discord) -> Result<T> {
         client.request(self.get_request()).await
     }
 }
@@ -99,7 +101,7 @@ where
 
     async fn patch(
         &self,
-        client: &impl Client,
+        client: &Discord,
         f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
     ) -> Result<T> {
         client.request(self.patch_request(f)).await
@@ -114,7 +116,7 @@ where
 {
     async fn edit(
         &mut self,
-        client: &impl Client,
+        client: &Discord,
         f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
     ) -> Result<()>;
 }
@@ -128,7 +130,7 @@ where
 {
     async fn edit(
         &mut self,
-        client: &impl Client,
+        client: &Discord,
         f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
     ) -> Result<()> {
         *self = self.patch(client, f).await?.into();
@@ -145,7 +147,7 @@ where
         Request::delete(self.uri())
     }
 
-    async fn delete(self, client: &impl Client) -> Result<()> {
+    async fn delete(self, client: &Discord) -> Result<()> {
         client.request(self.delete_request()).await
     }
 }

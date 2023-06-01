@@ -1,11 +1,6 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use tokio::{
-    sync::mpsc::{self, Sender},
-    task::JoinHandle,
-};
-use tokio_stream::wrappers::ReceiverStream;
 
 use crate::discord::{
     channel::Channel,
@@ -14,7 +9,7 @@ use crate::discord::{
         MessageComponent,
     },
     message::{Message, MessageIdentifier, MessageResource},
-    request::{Client, Result},
+    request::{Discord, Result},
     resource::{Resource, Snowflake},
 };
 
@@ -24,10 +19,8 @@ pub struct InteractionDispatcher {
 }
 
 pub struct GameTask {
-    channel: Snowflake<Channel>,
-    lobby: Snowflake<Message>,
-    sender: Sender<Interaction<MessageComponent>>,
-    handle: JoinHandle<Result<()>>,
+    ui: GameUI,
+    game: Box<dyn Logic<()> + Send>,
 }
 
 impl InteractionDispatcher {
@@ -37,16 +30,28 @@ impl InteractionDispatcher {
             channels: HashMap::new(),
         }
     }
-    pub async fn dispatch(&self, i: Interaction<MessageComponent>) {
-        if let Some(s) = self.lobbies.get(&i.data.message.id.snowflake()) {
-            self.channels.get(s).unwrap().sender.send(i).await.unwrap();
-        } else if let Some(s) = self.channels.get(&i.channel_id) {
-            s.sender.send(i).await.unwrap();
+    pub async fn dispatch(&mut self, client: &Discord, i: Interaction<MessageComponent>) {
+        let task = if let Some(s) = self.lobbies.get(&i.data.message.id.snowflake()) {
+            self.channels.get_mut(s).unwrap()
+        } else if let Some(s) = self.channels.get_mut(&i.channel_id) {
+            s
+        } else {
+            return;
+        };
+
+        let result = task.game.logic(client, &mut task.ui, i).await;
+
+        if result.is_ok() {
+            let channel = task.ui.channel;
+            let lobby = task.ui.lobby_msg.snowflake();
+            self.channels.remove(&channel);
+            self.lobbies.remove(&lobby);
         }
     }
     pub fn register(&mut self, task: GameTask) {
-        self.lobbies.insert(task.lobby, task.channel);
-        self.channels.insert(task.channel, task);
+        self.lobbies
+            .insert(task.ui.lobby_msg.snowflake(), task.ui.channel);
+        self.channels.insert(task.ui.channel, task);
     }
 }
 
@@ -57,20 +62,24 @@ pub struct GameUI {
 }
 
 #[async_trait]
-pub trait Game: Sized + Send + 'static {
-    fn new() -> Self;
-    fn name() -> &'static str;
-    fn lobby_msg_reply<'a>(msg: &'a mut CreateReply) -> &'a mut CreateReply;
-
+pub trait Logic<T> {
     async fn logic(
         &mut self,
-        client: &impl Client,
-        ui: GameUI,
-        stream: ReceiverStream<Interaction<MessageComponent>>,
-    ) -> Result<()>;
+        client: &Discord,
+        ui: &mut GameUI,
+        i: Interaction<MessageComponent>,
+    ) -> Result<T>;
+}
+
+#[async_trait]
+pub trait Game: Logic<()> + Sized + Send + 'static {
+    const NAME: &'static str;
+
+    fn new() -> Self;
+    fn lobby_msg_reply<'a>(msg: &'a mut CreateReply) -> &'a mut CreateReply;
 
     async fn start(
-        client: &(impl Client + 'static),
+        client: &Discord,
         token: InteractionToken<ApplicationCommand>,
     ) -> Result<GameTask> {
         // send lobby message
@@ -87,29 +96,16 @@ pub trait Game: Sized + Send + 'static {
             .await?;
 
         // create thread
-        let thread = msg.start_thread(client, Self::name().to_owned()).await?;
+        let thread = msg.start_thread(client, Self::NAME.to_owned()).await?;
 
         // create task
-        let ui = GameUI {
-            channel: thread.id,
-            lobby_msg: msg.id,
-            state_msg: None,
-        };
-
-        let mut game = Self::new();
-        let (tx, rx) = mpsc::channel(16);
-
-        let client = client.clone();
-        let handle = tokio::spawn(async move {
-            let future = game.logic(&client, ui, ReceiverStream::new(rx));
-            future.await
-        });
-
         Ok(GameTask {
-            channel: thread.id,
-            lobby: msg.id.snowflake(),
-            sender: tx,
-            handle,
+            ui: GameUI {
+                channel: thread.id,
+                lobby_msg: msg.id,
+                state_msg: None,
+            },
+            game: Box::new(Self::new()),
         })
     }
 }

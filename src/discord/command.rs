@@ -5,9 +5,11 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use crate::discord::{
     application::Application,
     guild::Guild,
-    request::{Client, Request, Result},
+    request::{Request, Result},
     resource::{Deletable, Resource, Snowflake},
 };
+
+use super::request::Discord;
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub struct Commands {
@@ -41,11 +43,60 @@ pub struct CommandData {
     #[serde(rename = "type", default)]
     #[builder(default)]
     pub input_type: CommandType,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[builder(default)]
+    pub options: Vec<CommandOption>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type")]
+pub enum CommandOption {
+    #[serde(rename = 3)]
+    String(StringOption),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Builder)]
+pub struct StringOption {
+    pub name: String,
+    pub description: String,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[builder(default)]
+    pub choices: Vec<Param<String>>,
+
+    #[serde(default)]
+    #[builder(default)]
+    pub required: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Param<T> {
+    pub name: String,
+    pub value: T,
+}
+
+impl<T> Param<T> {
+    pub fn new(name: String, value: T) -> Param<T> {
+        Param { name, value }
+    }
 }
 
 impl CommandData {
     pub fn builder() -> CommandDataBuilder {
         CommandDataBuilder::default()
+    }
+}
+
+impl StringOption {
+    pub fn builder() -> StringOptionBuilder {
+        StringOptionBuilder::default()
+    }
+}
+
+impl From<StringOption> for CommandOption {
+    fn from(value: StringOption) -> Self {
+        Self::String(value)
     }
 }
 
@@ -87,14 +138,14 @@ impl Commands {
     pub fn create_request(&self, command: &CommandData) -> Request<Command> {
         Request::post(self.uri(), command)
     }
-    pub async fn create(&self, client: &impl Client, command: &CommandData) -> Result<Command> {
+    pub async fn create(&self, client: &Discord, command: &CommandData) -> Result<Command> {
         client.request(self.create_request(command)).await
     }
 
     pub fn all_request(&self) -> Request<Vec<Command>> {
         Request::get(self.uri())
     }
-    pub async fn all(&self, client: &impl Client) -> Result<Vec<Command>> {
+    pub async fn all(&self, client: &Discord) -> Result<Vec<Command>> {
         client.request(self.all_request()).await
     }
 }

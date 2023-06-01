@@ -18,9 +18,9 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::discord::request::{self, Client, Request, RequestError};
+use crate::discord::request::{self, Request, RequestError};
 
-use super::{interaction::AnyInteraction, NAME};
+use super::{interaction::AnyInteraction, request::Discord};
 
 struct GatewayState {
     interval: Interval,
@@ -211,8 +211,10 @@ impl Stream for Gateway {
     }
 }
 
+const NAME: &str = env!("CARGO_PKG_NAME");
+
 impl Gateway {
-    pub async fn connect(client: &impl Client) -> request::Result<Self> {
+    pub async fn connect(client: &Discord) -> request::Result<Self> {
         let GatewayResponse { url } = client.request(Request::get("/gateway".to_owned())).await?;
         let full_url = url + "/?v=10&encoding=json";
 
@@ -235,7 +237,7 @@ impl Gateway {
         let identify = serde_json::to_string(&GatewayMessage {
             op: GatewayOpcode::Identify,
             d: Identify {
-                token: client.token().await.to_owned(),
+                token: client.token().to_owned(),
                 intents: 0,
                 properties: ConnectionProperties {
                     os: "linux".to_owned(),

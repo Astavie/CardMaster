@@ -6,9 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::discord::{
     channel::{Channel, ChannelResource},
     message::{CreateMessage, Message},
-    request::{Client, Request, Result},
+    request::{Request, Result},
     resource::{Patchable, Resource, Snowflake},
 };
+
+use super::request::Discord;
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
@@ -41,13 +43,13 @@ pub trait UserResource {
         )
     }
 
-    async fn create_dm(&self, client: &impl Client) -> Result<Channel> {
+    async fn create_dm(&self, client: &Discord) -> Result<Channel> {
         client.request(self.create_dm_request()).await
     }
 
     async fn send_message(
         &self,
-        client: &impl Client,
+        client: &Discord,
         f: impl for<'a> FnOnce(&'a mut CreateMessage) -> &'a mut CreateMessage + Send,
     ) -> Result<Message> {
         let channel = self.create_dm(client).await?;
