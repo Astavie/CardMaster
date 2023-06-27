@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use derive_setters::Setters;
+use enumset::{EnumSet, EnumSetType};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -7,7 +8,7 @@ use super::{
     application::Application,
     channel::Channel,
     command::CommandIdentifier,
-    message::{Message, PatchMessage},
+    message::{ActionRow, Embed, Message, PatchMessage},
     request::{Discord, Request, Result},
     resource::{Deletable, Patchable, Resource, Snowflake},
     user::User,
@@ -37,9 +38,23 @@ pub struct InteractionToken<T> {
 }
 
 #[derive(Default, Setters, Serialize)]
-#[setters(strip_option, borrow_self)]
+#[setters(strip_option)]
 pub struct CreateReply {
     content: Option<String>,
+
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    embeds: Vec<Embed>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    components: Vec<ActionRow>,
+
+    #[serde(skip_serializing_if = "EnumSet::is_empty")]
+    flags: EnumSet<ReplyFlag>,
+}
+
+#[derive(EnumSetType)]
+pub enum ReplyFlag {
+    Ephemeral = 6,
+    SuppressEmbeds = 2,
 }
 
 #[derive(Serialize)]
@@ -53,13 +68,8 @@ struct Response<T> {
 pub trait InteractionResource<T> {
     fn token(&self) -> &InteractionToken<T>;
 
-    fn reply_request(
-        &self,
-        f: impl for<'a> FnOnce(&'a mut CreateReply) -> &'a mut CreateReply,
-    ) -> Request<()> {
-        let mut reply = CreateReply::default();
-        f(&mut reply);
-
+    fn reply_request(&self, f: impl FnOnce(CreateReply) -> CreateReply) -> Request<()> {
+        let reply = f(CreateReply::default());
         let token = self.token();
         Request::post(
             format!("/interactions/{}/{}/callback", token.id, token.token),
@@ -72,9 +82,36 @@ pub trait InteractionResource<T> {
     async fn reply(
         &self,
         client: &Discord,
-        f: impl for<'a> FnOnce(&'a mut CreateReply) -> &'a mut CreateReply + Send,
+        f: impl FnOnce(CreateReply) -> CreateReply + Send,
     ) -> Result<InteractionResponseIdentifier> {
         client.request(self.reply_request(f)).await?;
+
+        let token = self.token();
+        Ok(InteractionResponseIdentifier {
+            application_id: token.application_id,
+            token: token.token.clone(),
+            message: None,
+        })
+    }
+
+    // TODO: put these in a ComponentInteractionResource trait
+    fn update_request(&self, f: impl FnOnce(CreateReply) -> CreateReply) -> Request<()> {
+        let reply = f(CreateReply::default());
+        let token = self.token();
+        Request::post(
+            format!("/interactions/{}/{}/callback", token.id, token.token),
+            &Response {
+                typ: 7,
+                data: reply,
+            },
+        )
+    }
+    async fn update(
+        &self,
+        client: &Discord,
+        f: impl FnOnce(CreateReply) -> CreateReply + Send,
+    ) -> Result<InteractionResponseIdentifier> {
+        client.request(self.update_request(f)).await?;
 
         let token = self.token();
         Ok(InteractionResponseIdentifier {

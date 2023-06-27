@@ -1,14 +1,15 @@
 use async_trait::async_trait;
 
-use crate::{
-    discord::{
-        interaction::{CreateReply, Interaction, MessageComponent},
-        request::{Discord, Result},
-    },
-    game::{Game, GameUI, Logic},
+use crate::game::{Flow, Game, GameMessage, GameUI, Logic, Setup, SetupOption};
+
+use discord::{
+    interaction::{Interaction, MessageComponent},
+    request::Discord,
 };
 
-pub struct CAH {}
+pub struct CAH {
+    setup: Setup,
+}
 
 #[async_trait]
 impl Logic<()> for CAH {
@@ -17,20 +18,29 @@ impl Logic<()> for CAH {
         client: &Discord,
         ui: &mut GameUI,
         i: Interaction<MessageComponent>,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Flow<()> {
+        self.setup.logic(client, ui, i).await?;
+        Flow::Return(())
     }
 }
 
 #[async_trait]
 impl Game for CAH {
-    const NAME: &'static str = "Cards Against Humanity";
+    const NAME: &'static str = "Crappy Ableist Humor";
+    const COLOR: u32 = 0x000000;
 
     fn new() -> Self {
-        CAH {}
+        CAH {
+            setup: Setup {
+                options: vec![
+                    ("Cards".to_owned(), SetupOption::Number(5, 20, 10)),
+                    ("Points".to_owned(), SetupOption::Number(1, i32::MAX, 8)),
+                ],
+            },
+        }
     }
 
-    fn lobby_msg_reply<'a>(msg: &'a mut CreateReply) -> &'a mut CreateReply {
-        msg.content("# Crappy Ableist Humor".to_owned())
+    fn lobby_msg_reply(&self) -> GameMessage {
+        Self::message(Vec::new(), self.setup.render())
     }
 }

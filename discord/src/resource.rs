@@ -3,9 +3,7 @@ use std::{any::type_name, fmt, marker::PhantomData, num::ParseIntError};
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::discord::request::{Request, Result};
-
-use super::request::Discord;
+use super::request::{Discord, Request, Result};
 
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
@@ -93,17 +91,12 @@ where
     T: DeserializeOwned + Unpin + Send + Sync,
     B: Default + Serialize,
 {
-    fn patch_request(&self, f: impl FnOnce(&mut B) -> &mut B) -> Request<T> {
-        let mut builder = B::default();
-        f(&mut builder);
+    fn patch_request(&self, f: impl FnOnce(B) -> B) -> Request<T> {
+        let builder = f(B::default());
         Request::patch(self.uri(), &builder)
     }
 
-    async fn patch(
-        &self,
-        client: &Discord,
-        f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
-    ) -> Result<T> {
+    async fn patch(&self, client: &Discord, f: impl FnOnce(B) -> B + Send) -> Result<T> {
         client.request(self.patch_request(f)).await
     }
 }
@@ -114,11 +107,7 @@ where
     T: DeserializeOwned + Unpin + Send + Sync,
     B: Default + Serialize,
 {
-    async fn edit(
-        &mut self,
-        client: &Discord,
-        f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
-    ) -> Result<()>;
+    async fn edit(&mut self, client: &Discord, f: impl FnOnce(B) -> B + Send) -> Result<()>;
 }
 
 #[async_trait]
@@ -128,11 +117,7 @@ where
     T: DeserializeOwned + Unpin + Send + Sync + Into<Self>,
     B: Default + Serialize,
 {
-    async fn edit(
-        &mut self,
-        client: &Discord,
-        f: impl for<'a> FnOnce(&'a mut B) -> &'a mut B + Send,
-    ) -> Result<()> {
+    async fn edit(&mut self, client: &Discord, f: impl FnOnce(B) -> B + Send) -> Result<()> {
         *self = self.patch(client, f).await?.into();
         Ok(())
     }

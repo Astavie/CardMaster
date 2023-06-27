@@ -1,14 +1,13 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::discord::{
+use super::request::Discord;
+use super::{
     command::Commands,
     guild::GuildResource,
     request::{Request, Result},
     resource::Snowflake,
 };
-
-use super::request::Discord;
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]

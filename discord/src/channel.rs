@@ -2,13 +2,12 @@ use async_trait::async_trait;
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::discord::{
+use super::request::Discord;
+use super::{
     message::{CreateMessage, Message},
     request::{Request, Result},
     resource::{Resource, Snowflake},
 };
-
-use super::request::Discord;
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
@@ -22,17 +21,16 @@ pub trait ChannelResource {
 
     fn send_message_request(
         &self,
-        f: impl for<'a> FnOnce(&'a mut CreateMessage) -> &'a mut CreateMessage,
+        f: impl FnOnce(CreateMessage) -> CreateMessage,
     ) -> Request<Message> {
-        let mut msg = CreateMessage::default();
-        f(&mut msg);
+        let msg = f(CreateMessage::default());
         Request::post(format!("/channels/{}/messages", self.endpoint()), &msg)
     }
 
     async fn send_message(
         &self,
         client: &Discord,
-        f: impl for<'a> FnOnce(&'a mut CreateMessage) -> &'a mut CreateMessage + Send,
+        f: impl FnOnce(CreateMessage) -> CreateMessage + Send,
     ) -> Result<Message> {
         client.request(self.send_message_request(f)).await
     }

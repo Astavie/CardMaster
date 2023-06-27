@@ -1,23 +1,24 @@
+#![feature(try_trait_v2)]
+
 use async_trait::async_trait;
 use cah::CAH;
 use discord::command::{Param, StringOption};
-use discord::interaction::{AnyInteraction, CreateReply, InteractionResource, MessageComponent};
+use discord::interaction::{AnyInteraction, InteractionResource, MessageComponent};
 use discord::request::Discord;
 use dotenv_codegen::dotenv;
 use futures_util::StreamExt;
-use game::{Game, GameUI, InteractionDispatcher, Logic};
+use game::{Flow, Game, GameMessage, GameUI, InteractionDispatcher, Logic};
 
-use crate::discord::application::{Application, ApplicationResource};
-use crate::discord::command::CommandData;
-use crate::discord::command::Commands;
-use crate::discord::gateway::Gateway;
-use crate::discord::gateway::GatewayEvent;
-use crate::discord::interaction::Interaction;
-use crate::discord::request::Result;
-use crate::discord::resource::Deletable;
+use discord::application::{Application, ApplicationResource};
+use discord::command::CommandData;
+use discord::command::Commands;
+use discord::gateway::Gateway;
+use discord::gateway::GatewayEvent;
+use discord::interaction::Interaction;
+use discord::request::Result;
+use discord::resource::Deletable;
 
 mod cah;
-mod discord;
 mod game;
 
 const RUSTMASTER: &str = dotenv!("RUSTMASTER");
@@ -69,21 +70,22 @@ impl Logic<()> for TestGame {
         _client: &Discord,
         _ui: &mut GameUI,
         _i: Interaction<MessageComponent>,
-    ) -> Result<()> {
-        Ok(())
+    ) -> Flow<()> {
+        Flow::Return(())
     }
 }
 
 #[async_trait]
 impl Game for TestGame {
     const NAME: &'static str = "Test";
+    const COLOR: u32 = 0xFFFFFF;
 
     fn new() -> Self {
         TestGame
     }
 
-    fn lobby_msg_reply<'a>(msg: &'a mut CreateReply) -> &'a mut CreateReply {
-        msg.content("# lobby".to_owned())
+    fn lobby_msg_reply(&self) -> GameMessage {
+        Self::message(Vec::new(), Vec::new())
     }
 }
 
@@ -102,6 +104,25 @@ async fn run() -> Result<()> {
             &CommandData::builder()
                 .name("ping".to_owned())
                 .description("Replies with pong!".to_owned())
+                .build()
+                .unwrap(),
+        )
+        .await?;
+
+    application
+        .global_commands()
+        .create(
+            &client,
+            &CommandData::builder()
+                .name("birthday".to_owned())
+                .description("Sets user birthday".to_owned())
+                .options(vec![StringOption::builder()
+                    .name("birthday".to_owned())
+                    .description("Your birthday".to_owned())
+                    .required(true)
+                    .build()
+                    .unwrap()
+                    .into()])
                 .build()
                 .unwrap(),
         )

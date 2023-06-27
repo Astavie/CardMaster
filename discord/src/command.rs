@@ -2,14 +2,13 @@ use derive_builder::Builder;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::discord::{
+use super::request::Discord;
+use super::{
     application::Application,
     guild::Guild,
     request::{Request, Result},
     resource::{Deletable, Resource, Snowflake},
 };
-
-use super::request::Discord;
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub struct Commands {
@@ -36,6 +35,7 @@ pub enum CommandType {
 }
 
 #[derive(Debug, Deserialize, Serialize, Builder)]
+#[builder(pattern = "owned")]
 pub struct CommandData {
     pub name: String,
     pub description: String,
@@ -49,14 +49,15 @@ pub struct CommandData {
     pub options: Vec<CommandOption>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum CommandOption {
     #[serde(rename = 3)]
     String(StringOption),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, Builder)]
+#[derive(Debug, Deserialize, Serialize, Builder)]
+#[builder(pattern = "owned")]
 pub struct StringOption {
     pub name: String,
     pub description: String,
@@ -70,7 +71,7 @@ pub struct StringOption {
     pub required: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Param<T> {
     pub name: String,
     pub value: T,

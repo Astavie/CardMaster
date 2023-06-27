@@ -203,7 +203,7 @@ impl Discord {
                 .header("Content-Type", "application/json")
                 .body(body.clone())
                 .unwrap();
-            // println!("{}", request.body());
+            println!("{}", request.body());
             isahc::send_async(request)
         } else {
             let request = http.body(()).unwrap();
@@ -261,7 +261,7 @@ impl Discord {
         }
 
         let string = response.text().await.unwrap();
-        // println!("{}", string);
+        println!("{}", string);
 
         if response.status().is_client_error() {
             return Err(RequestError::ClientError(response.status()));
@@ -274,7 +274,10 @@ impl Discord {
         if response.status() == StatusCode::NO_CONTENT {
             Ok(serde_json::from_str("null").unwrap())
         } else {
-            serde_json::from_str(&string).map_err(|_| RequestError::ServerError)
+            serde_json::from_str(&string).map_err(|e| {
+                println!("{}", e);
+                RequestError::ServerError
+            })
         }
     }
 

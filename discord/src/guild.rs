@@ -1,7 +1,7 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::discord::resource::{Resource, Snowflake};
+use super::resource::{Resource, Snowflake};
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]

@@ -18,8 +18,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::discord::request::{self, Request, RequestError};
-
+use super::request::{self, Request, RequestError};
 use super::{interaction::AnyInteraction, request::Discord};
 
 struct GatewayState {

@@ -1,18 +1,19 @@
 {
-  inputs.nixpkgs.url = github:NixOS/nixpkgs/nixos-22.11;
+  inputs.astapkgs.url = "github:Astavie/astapkgs";
 
-  outputs = { self, nixpkgs }: let
-    apkgs = import nixpkgs {
-      system = "x86_64-linux";
-    };
-  in {
-    devShells.x86_64-linux.default = with apkgs; mkShell {
+  outputs = { self, astapkgs }: astapkgs.lib.package {
+
+    # package = pkgs: with pkgs; ...
+
+    devShell = pkgs: with pkgs; mkShell {
+
       buildInputs = [
+        dev.rust-nightly
         pkg-config
         openssl
       ];
-      LD_LIBRARY_PATH = lib.makeLibraryPath [
-      ];
+      
     };
-  };
+    
+  } [ "x86_64-linux" ];
 }

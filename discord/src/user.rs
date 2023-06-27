@@ -3,14 +3,13 @@ use derive_setters::Setters;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 
-use crate::discord::{
+use super::request::Discord;
+use super::{
     channel::{Channel, ChannelResource},
     message::{CreateMessage, Message},
     request::{Request, Result},
     resource::{Patchable, Resource, Snowflake},
 };
-
-use super::request::Discord;
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
@@ -20,7 +19,7 @@ pub struct User {
 }
 
 #[derive(Default, Setters, Serialize)]
-#[setters(strip_option, borrow_self)]
+#[setters(strip_option)]
 pub struct PatchUser {
     username: Option<String>,
 }
@@ -50,7 +49,7 @@ pub trait UserResource {
     async fn send_message(
         &self,
         client: &Discord,
-        f: impl for<'a> FnOnce(&'a mut CreateMessage) -> &'a mut CreateMessage + Send,
+        f: impl FnOnce(CreateMessage) -> CreateMessage + Send,
     ) -> Result<Message> {
         let channel = self.create_dm(client).await?;
         channel.send_message(client, f).await
