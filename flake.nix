@@ -11,6 +11,7 @@
         dev.rust-nightly
         pkg-config
         openssl
+        gcc
       ];
       
     };

@@ -5,7 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use monostate::MustBePosInt;
+use monostate::MustBeU64;
 
 use discord::{
     channel::{Channel, ChannelResource},
@@ -249,7 +249,7 @@ impl Setup {
         self.options
             .iter()
             .map(|op| ActionRow {
-                typ: MustBePosInt::<1>,
+                typ: MustBeU64::<1>,
                 components: match op.1 {
                     SetupOption::MultiSelect(_) => todo!(),
                     SetupOption::Flags(_) => todo!(),

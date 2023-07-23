@@ -79,7 +79,7 @@ pub struct Embed {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionRow {
     #[serde(rename = "type")]
-    pub typ: MustBe!(1),
+    pub typ: MustBe!(1u64),
     pub components: Vec<ActionRowComponent>,
 }
 

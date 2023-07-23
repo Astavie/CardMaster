@@ -13,7 +13,6 @@ serde_json = "1.0.96"
 tokio = { version = "1.27.0", features = ["full"] }
 partial_id = { path = "partial_id" }
 serde_repr = "0.1.12"
-derive_builder = "0.12.0"
 tokio-tungstenite = { version = "0.18.0", features = ["native-tls"] }
 futures-util = "0.3.28"
 rand = "0.8.5"
@@ -21,3 +20,6 @@ tokio-stream = "0.1.14"
 async-trait = "0.1.68"
 enumset = { version = "1.1.2", features = ["serde"] }
 monostate = "0.1.6"
+
+[patch.crates-io]
+serde = { git = "https://github.com/Astavie/serde.git", branch = "integer-tags-for-enums-noprecompile" }

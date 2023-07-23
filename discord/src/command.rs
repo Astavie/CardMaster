@@ -1,4 +1,4 @@
-use derive_builder::Builder;
+use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
@@ -34,19 +34,33 @@ pub enum CommandType {
     Message = 3,
 }
 
-#[derive(Debug, Deserialize, Serialize, Builder)]
-#[builder(pattern = "owned")]
+#[derive(Debug, Deserialize, Serialize, Setters)]
 pub struct CommandData {
+    #[setters(skip)]
     pub name: String,
+    #[setters(skip)]
     pub description: String,
 
     #[serde(rename = "type", default)]
-    #[builder(default)]
     pub input_type: CommandType,
 
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    #[builder(default)]
     pub options: Vec<CommandOption>,
+}
+
+impl CommandData {
+    pub fn new<S1, S2>(name: S1, description: S2) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+    {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            input_type: CommandType::ChatInput,
+            options: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -56,19 +70,34 @@ pub enum CommandOption {
     String(StringOption),
 }
 
-#[derive(Debug, Deserialize, Serialize, Builder)]
-#[builder(pattern = "owned")]
+#[derive(Debug, Deserialize, Serialize, Setters)]
 pub struct StringOption {
+    #[setters(skip)]
     pub name: String,
+    #[setters(skip)]
     pub description: String,
 
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    #[builder(default)]
     pub choices: Vec<Param<String>>,
 
     #[serde(default)]
-    #[builder(default)]
+    #[setters(bool)]
     pub required: bool,
+}
+
+impl StringOption {
+    pub fn new<S1, S2>(name: S1, description: S2) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+    {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            choices: Vec::new(),
+            required: false,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -78,20 +107,14 @@ pub struct Param<T> {
 }
 
 impl<T> Param<T> {
-    pub fn new(name: String, value: T) -> Param<T> {
-        Param { name, value }
-    }
-}
-
-impl CommandData {
-    pub fn builder() -> CommandDataBuilder {
-        CommandDataBuilder::default()
-    }
-}
-
-impl StringOption {
-    pub fn builder() -> StringOptionBuilder {
-        StringOptionBuilder::default()
+    pub fn new<S>(name: S, value: T) -> Param<T>
+    where
+        S: Into<String>,
+    {
+        Param {
+            name: name.into(),
+            value,
+        }
     }
 }
 

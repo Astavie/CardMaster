@@ -99,13 +99,19 @@ async fn run() -> Result<()> {
 
     application
         .global_commands()
+        .create(&client, &CommandData::new("ping", "Replies with pong!"))
+        .await?;
+
+    application
+        .global_commands()
         .create(
             &client,
-            &CommandData::builder()
-                .name("ping".to_owned())
-                .description("Replies with pong!".to_owned())
-                .build()
-                .unwrap(),
+            &CommandData::new("birthday", "Sets user birthday").options(vec![StringOption::new(
+                "birthday",
+                "Your birthday",
+            )
+            .required()
+            .into()]),
         )
         .await?;
 
@@ -113,41 +119,16 @@ async fn run() -> Result<()> {
         .global_commands()
         .create(
             &client,
-            &CommandData::builder()
-                .name("birthday".to_owned())
-                .description("Sets user birthday".to_owned())
-                .options(vec![StringOption::builder()
-                    .name("birthday".to_owned())
-                    .description("Your birthday".to_owned())
-                    .required(true)
-                    .build()
-                    .unwrap()
-                    .into()])
-                .build()
-                .unwrap(),
-        )
-        .await?;
-
-    application
-        .global_commands()
-        .create(
-            &client,
-            &CommandData::builder()
-                .name("play".to_owned())
-                .description("Start a new game".to_owned())
-                .options(vec![StringOption::builder()
-                    .name("game".to_owned())
-                    .description("What game to play".to_owned())
-                    .required(true)
-                    .choices(vec![
-                        Param::new(TestGame::NAME.to_owned(), TestGame::NAME.to_owned()),
-                        Param::new(CAH::NAME.to_owned(), CAH::NAME.to_owned()),
-                    ])
-                    .build()
-                    .unwrap()
-                    .into()])
-                .build()
-                .unwrap(),
+            &CommandData::new("play", "Start a new game").options(vec![StringOption::new(
+                "game",
+                "What game to play",
+            )
+            .required()
+            .choices(vec![
+                Param::new(TestGame::NAME, TestGame::NAME.to_owned()),
+                Param::new(CAH::NAME, CAH::NAME.to_owned()),
+            ])
+            .into()]),
         )
         .await?;
 
