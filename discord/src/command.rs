@@ -2,6 +2,8 @@ use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use crate::request::Client;
+
 use super::request::Discord;
 use super::{
     application::Application,

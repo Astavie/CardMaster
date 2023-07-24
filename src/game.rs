@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     convert, format,
     ops::{ControlFlow, FromResidual, Try},
 };
@@ -8,22 +7,20 @@ use async_trait::async_trait;
 use monostate::MustBeU64;
 
 use discord::{
-    channel::{Channel, ChannelResource},
     interaction::{
-        ApplicationCommand, Interaction, InteractionResource, InteractionToken, MessageComponent,
-        ReplyFlag,
+        ApplicationCommand, Interaction, InteractionResource, InteractionResponseIdentifier,
+        InteractionToken, MessageComponent, ReplyFlag, Webhook,
     },
     message::{
         ActionRow, ActionRowComponent, Author, Button, ButtonStyle, Embed, Field, Message,
-        MessageIdentifier, MessageResource, SelectOption, TextSelectMenu,
+        SelectOption, TextSelectMenu,
     },
-    request::{Discord, Result},
+    request::Result,
     resource::{Patchable, Resource, Snowflake},
 };
 
 pub struct InteractionDispatcher {
-    lobbies: HashMap<Snowflake<Message>, Snowflake<Channel>>,
-    channels: HashMap<Snowflake<Channel>, GameTask>,
+    games: Vec<GameTask>,
 }
 
 pub struct GameTask {
@@ -33,40 +30,30 @@ pub struct GameTask {
 
 impl InteractionDispatcher {
     pub fn new() -> Self {
-        InteractionDispatcher {
-            lobbies: HashMap::new(),
-            channels: HashMap::new(),
-        }
+        InteractionDispatcher { games: Vec::new() }
     }
-    pub async fn dispatch(&mut self, client: &Discord, i: Interaction<MessageComponent>) {
-        let task = if let Some(s) = self.lobbies.get(&i.data.message.id.snowflake()) {
-            self.channels.get_mut(s).unwrap()
-        } else if let Some(s) = self.channels.get_mut(&i.channel_id) {
-            s
-        } else {
-            return;
-        };
+    pub async fn dispatch(&mut self, i: Interaction<MessageComponent>) {
+        let msg = i.data.message.id.snowflake();
+        let Some(pos) = self
+            .games
+            .iter()
+            .position(|s| s.ui.msg_id == msg) else { return };
 
-        let result = task.game.logic(client, &mut task.ui, i).await;
+        let task = &mut self.games[pos];
+        let result = task.game.logic(&mut task.ui, i).await;
 
         if result.is_done() {
-            let channel = task.ui.channel;
-            let lobby = task.ui.lobby_msg.snowflake();
-            self.channels.remove(&channel);
-            self.lobbies.remove(&lobby);
+            self.games.swap_remove(pos);
         }
     }
     pub fn register(&mut self, task: GameTask) {
-        self.lobbies
-            .insert(task.ui.lobby_msg.snowflake(), task.ui.channel);
-        self.channels.insert(task.ui.channel, task);
+        self.games.push(task);
     }
 }
 
 pub struct GameUI {
-    pub channel: Snowflake<Channel>,
-    pub lobby_msg: MessageIdentifier,
-    pub state_msg: Option<MessageIdentifier>,
+    pub msg: InteractionResponseIdentifier,
+    pub msg_id: Snowflake<Message>,
 }
 
 pub struct GameMessage {
@@ -84,36 +71,23 @@ impl From<Message> for GameMessage {
 }
 
 impl GameUI {
-    pub async fn edit_lobby(&self, client: &Discord, message: GameMessage) -> Result<()> {
-        self.lobby_msg
-            .patch(client, |m| {
+    pub async fn push(&mut self, message: GameMessage) -> Result<()> {
+        let (id, m) = self
+            .msg
+            .followup(&Webhook, |m| {
                 m.embeds(vec![message.embed]).components(message.components)
             })
             .await?;
+        self.msg = id;
+        self.msg_id = m.id.snowflake();
         Ok(())
     }
-    pub async fn edit_state(&mut self, client: &Discord, message: GameMessage) -> Result<()> {
-        match self.state_msg {
-            Some(msg) => {
-                msg.patch(client, |m| {
-                    m.embeds(vec![message.embed]).components(message.components)
-                })
-                .await?;
-            }
-            None => {
-                self.push_state(client, message).await?;
-            }
-        }
-        Ok(())
-    }
-    pub async fn push_state(&mut self, client: &Discord, message: GameMessage) -> Result<()> {
-        let msg = self
-            .channel
-            .send_message(client, |m| {
+    pub async fn edit(&self, message: GameMessage) -> Result<()> {
+        self.msg
+            .patch(&Webhook, |m| {
                 m.embeds(vec![message.embed]).components(message.components)
             })
             .await?;
-        self.state_msg = Some(msg.id);
         Ok(())
     }
     pub async fn reply(
@@ -121,7 +95,7 @@ impl GameUI {
         i: InteractionToken<MessageComponent>,
         message: GameMessage,
     ) -> Result<()> {
-        i.reply(|m| {
+        i.reply(&Webhook, |m| {
             m.embeds(vec![message.embed])
                 .components(message.components)
                 .flags(ReplyFlag::Ephemeral.into())
@@ -134,8 +108,10 @@ impl GameUI {
         i: InteractionToken<MessageComponent>,
         message: GameMessage,
     ) -> Result<()> {
-        i.update(|m| m.embeds(vec![message.embed]).components(message.components))
-            .await?;
+        i.update(&Webhook, |m| {
+            m.embeds(vec![message.embed]).components(message.components)
+        })
+        .await?;
         Ok(())
     }
 }
@@ -191,12 +167,7 @@ impl<T> FromResidual<Option<convert::Infallible>> for Flow<T> {
 
 #[async_trait]
 pub trait Logic<T> {
-    async fn logic(
-        &mut self,
-        client: &Discord,
-        ui: &mut GameUI,
-        i: Interaction<MessageComponent>,
-    ) -> Flow<T>;
+    async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> Flow<T>;
 }
 
 #[async_trait]
@@ -207,29 +178,23 @@ pub trait Game: Logic<()> + Sized + 'static {
     fn new() -> Self;
     fn lobby_msg_reply(&self) -> GameMessage;
 
-    async fn start(
-        client: &Discord,
-        token: InteractionToken<ApplicationCommand>,
-    ) -> Result<GameTask> {
+    async fn start(token: InteractionToken<ApplicationCommand>) -> Result<GameTask> {
         let me = Self::new();
 
         // send lobby message
         let msg = me.lobby_msg_reply();
-        let msg = token
-            .reply(|m| m.embeds(vec![msg.embed]).components(msg.components))
-            .await?
-            .get(client)
+        let id = token
+            .reply(&Webhook, |m| {
+                m.embeds(vec![msg.embed]).components(msg.components)
+            })
             .await?;
-
-        // create thread
-        let thread = msg.start_thread(client, Self::NAME.to_owned()).await?;
+        let msg = id.get(&Webhook).await?;
 
         // create task
         Ok(GameTask {
             ui: GameUI {
-                channel: thread.id,
-                lobby_msg: msg.id,
-                state_msg: None,
+                msg: id,
+                msg_id: msg.id.snowflake(),
             },
             game: Box::new(Self::new()),
         })
@@ -343,12 +308,7 @@ impl Setup {
 
 #[async_trait]
 impl Logic<()> for Setup {
-    async fn logic(
-        &mut self,
-        client: &Discord,
-        ui: &mut GameUI,
-        it: Interaction<MessageComponent>,
-    ) -> Flow<()> {
+    async fn logic(&mut self, ui: &mut GameUI, it: Interaction<MessageComponent>) -> Flow<()> {
         // update state
         let mut chars = it.data.custom_id.chars();
         let ob = chars.next()?;

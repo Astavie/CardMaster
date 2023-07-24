@@ -3,6 +3,8 @@ use derive_setters::Setters;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 
+use crate::request::Client;
+
 use super::request::Discord;
 use super::{
     channel::{Channel, ChannelResource},

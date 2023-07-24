@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use cah::CAH;
 use discord::command::{Param, StringOption};
-use discord::interaction::{AnyInteraction, InteractionResource, MessageComponent};
+use discord::interaction::{AnyInteraction, InteractionResource, MessageComponent, Webhook};
 use discord::request::Discord;
 use dotenv_codegen::dotenv;
 use futures_util::StreamExt;
@@ -32,24 +32,20 @@ async fn purge(commands: Commands, client: &Discord) -> Result<()> {
     Ok(())
 }
 
-async fn on_command(
-    client: &Discord,
-    i: AnyInteraction,
-    d: &mut InteractionDispatcher,
-) -> Result<()> {
+async fn on_command(i: AnyInteraction, d: &mut InteractionDispatcher) -> Result<()> {
     match i {
         AnyInteraction::Command(command) => match command.data.name.as_str() {
             "ping" => {
                 command
                     .token
-                    .reply(|m| m.content("hurb".to_owned()))
+                    .reply(&Webhook, |m| m.content("hurb".to_owned()))
                     .await?;
             }
             "play" => {
                 let game = command.data.options[0].as_string().unwrap();
                 let task = match game {
-                    TestGame::NAME => TestGame::start(client, command.token),
-                    CAH::NAME => CAH::start(client, command.token),
+                    TestGame::NAME => TestGame::start(command.token),
+                    CAH::NAME => CAH::start(command.token),
                     _ => panic!("unknown game"),
                 }
                 .await?;
@@ -57,7 +53,7 @@ async fn on_command(
             }
             _ => {}
         },
-        AnyInteraction::Component(comp) => d.dispatch(client, comp).await,
+        AnyInteraction::Component(comp) => d.dispatch(comp).await,
     };
     Ok(())
 }
@@ -66,12 +62,7 @@ struct TestGame;
 
 #[async_trait]
 impl Logic<()> for TestGame {
-    async fn logic(
-        &mut self,
-        _client: &Discord,
-        _ui: &mut GameUI,
-        _i: Interaction<MessageComponent>,
-    ) -> Flow<()> {
+    async fn logic(&mut self, _ui: &mut GameUI, _i: Interaction<MessageComponent>) -> Flow<()> {
         Flow::Return(())
     }
 }
@@ -140,7 +131,7 @@ async fn run() -> Result<()> {
     let mut gateway = Gateway::connect(&client).await?;
     while let Some(event) = gateway.next().await {
         match event {
-            GatewayEvent::InteractionCreate(i) => on_command(&client, i, &mut dispatch).await?,
+            GatewayEvent::InteractionCreate(i) => on_command(i, &mut dispatch).await?,
             _ => {}
         }
     }

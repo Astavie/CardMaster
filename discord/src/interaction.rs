@@ -7,7 +7,7 @@ use isahc::{http::StatusCode, AsyncReadResponseExt};
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-use crate::request::RequestError;
+use crate::request::{Client, RequestError};
 
 use super::{
     application::Application,
@@ -50,7 +50,7 @@ impl<T: 'static> Drop for InteractionToken<T> {
             application_id: self.application_id,
         };
         tokio::spawn(async move {
-            let _ = clone.deferred_update().await;
+            let _ = clone.deferred_update(&Webhook).await;
         });
     }
 }
@@ -82,77 +82,67 @@ struct Response<T> {
     data: T,
 }
 
-async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O, O>(
-    request: Request<T, O, F>,
-) -> Result<O> {
-    // send request
-    let http = isahc::Request::builder()
-        .method(request.method.clone())
-        .uri("https://discord.com/api/v10".to_owned() + &request.uri);
+pub struct Webhook;
 
-    let mut response = if let Some(body) = request.body.as_ref() {
-        let request = http
-            .header("Content-Type", "application/json")
-            .body(body.clone())
-            .unwrap();
-        println!("{}", request.body());
-        isahc::send_async(request)
-    } else {
-        let request = http.body(()).unwrap();
-        isahc::send_async(request)
-    }
-    .await
-    .map_err(|err| {
-        if err.is_client() || err.is_server() || err.is_tls() {
-            RequestError::Authorization
+#[async_trait]
+impl Client for Webhook {
+    async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O + Send, O>(
+        &self,
+        request: Request<T, Self, O, F>,
+    ) -> Result<O> {
+        // send request
+        let http = isahc::Request::builder()
+            .method(request.method.clone())
+            .uri("https://discord.com/api/v10".to_owned() + &request.uri);
+
+        let mut response = if let Some(body) = request.body.as_ref() {
+            let request = http
+                .header("Content-Type", "application/json")
+                .body(body.clone())
+                .unwrap();
+            println!("{}", request.body());
+            isahc::send_async(request)
         } else {
-            RequestError::Network
+            let request = http.body(()).unwrap();
+            isahc::send_async(request)
         }
-    })?;
+        .await
+        .map_err(|err| {
+            if err.is_client() || err.is_server() || err.is_tls() {
+                RequestError::Authorization
+            } else {
+                RequestError::Network
+            }
+        })?;
 
-    // check errors
-    if response.status() == StatusCode::TOO_MANY_REQUESTS {
-        return Err(RequestError::RateLimited);
+        // check errors
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            return Err(RequestError::RateLimited);
+        }
+
+        let string = response.text().await.unwrap();
+        println!("{}", string);
+
+        if response.status().is_client_error() {
+            return Err(RequestError::ClientError(response.status()));
+        }
+
+        if response.status().is_server_error() {
+            return Err(RequestError::ServerError);
+        }
+
+        let t: T = if response.status() == StatusCode::NO_CONTENT {
+            serde_json::from_str("null").unwrap()
+        } else {
+            serde_json::from_str(&string).map_err(|e| {
+                println!("{}", e);
+                RequestError::ServerError
+            })?
+        };
+
+        let f = request.map;
+        Ok(f(t))
     }
-
-    let string = response.text().await.unwrap();
-    println!("{}", string);
-
-    if response.status().is_client_error() {
-        return Err(RequestError::ClientError(response.status()));
-    }
-
-    if response.status().is_server_error() {
-        return Err(RequestError::ServerError);
-    }
-
-    let t: T = if response.status() == StatusCode::NO_CONTENT {
-        serde_json::from_str("null").unwrap()
-    } else {
-        serde_json::from_str(&string).map_err(|e| {
-            println!("{}", e);
-            RequestError::ServerError
-        })?
-    };
-
-    let f = request.map;
-    Ok(f(t))
-}
-
-async fn request<T: DeserializeOwned, F: FnOnce(T) -> O, O>(
-    request: Request<T, O, F>,
-) -> Result<O> {
-    request_weak(request).await
-    // loop {
-    //     match request_weak(&request).await {
-    //         Err(RequestError::RateLimited) => (),
-    //         Err(RequestError::Network) => {
-    //             // TODO: retry
-    //             todo!("network error");
-    //         }
-    //         r => break r,
-    //     }
-    // }
 }
 
 impl<T> InteractionToken<T> {
@@ -174,6 +164,7 @@ pub trait InteractionResource<T: 'static>: Sized {
         f: impl FnOnce(CreateReply) -> CreateReply + Send,
     ) -> Request<
         (),
+        Webhook,
         InteractionResponseIdentifier,
         impl FnOnce(()) -> InteractionResponseIdentifier + Send,
     > {
@@ -197,9 +188,10 @@ pub trait InteractionResource<T: 'static>: Sized {
     }
     async fn reply(
         self,
+        wh: &Webhook,
         f: impl FnOnce(CreateReply) -> CreateReply + Send,
     ) -> Result<InteractionResponseIdentifier> {
-        request(self.reply_request(f)).await
+        wh.request(self.reply_request(f)).await
     }
 
     // TODO: put these in a ComponentInteractionResource trait
@@ -208,6 +200,7 @@ pub trait InteractionResource<T: 'static>: Sized {
         f: impl FnOnce(CreateReply) -> CreateReply,
     ) -> Request<
         (),
+        Webhook,
         InteractionResponseIdentifier,
         impl FnOnce(()) -> InteractionResponseIdentifier + Send,
     > {
@@ -231,15 +224,17 @@ pub trait InteractionResource<T: 'static>: Sized {
     }
     async fn update(
         self,
+        wh: &Webhook,
         f: impl FnOnce(CreateReply) -> CreateReply + Send,
     ) -> Result<InteractionResponseIdentifier> {
-        request(self.update_request(f)).await
+        wh.request(self.update_request(f)).await
     }
 
     fn deferred_update_request(
         self,
     ) -> Request<
         (),
+        Webhook,
         InteractionResponseIdentifier,
         impl FnOnce(()) -> InteractionResponseIdentifier + Send,
     > {
@@ -255,8 +250,8 @@ pub trait InteractionResource<T: 'static>: Sized {
             }
         })
     }
-    async fn deferred_update(self) -> Result<InteractionResponseIdentifier> {
-        request(self.deferred_update_request()).await
+    async fn deferred_update(self, wh: &Webhook) -> Result<InteractionResponseIdentifier> {
+        wh.request(self.deferred_update_request()).await
     }
 }
 
@@ -266,7 +261,46 @@ pub struct InteractionResponseIdentifier {
     message: Option<Snowflake<Message>>,
 }
 
+impl InteractionResponseIdentifier {
+    pub fn followup_request(
+        &self,
+        f: impl FnOnce(CreateReply) -> CreateReply,
+    ) -> Request<
+        Message,
+        Webhook,
+        (InteractionResponseIdentifier, Message),
+        impl FnOnce(Message) -> (InteractionResponseIdentifier, Message),
+    > {
+        let reply = f(CreateReply::default());
+        let application_id = self.application_id;
+        let token = self.token.clone();
+        Request::post(
+            format!("/webhooks/{}/{}", self.application_id, self.token),
+            &reply,
+        )
+        .map(move |m: Message| {
+            (
+                InteractionResponseIdentifier {
+                    application_id,
+                    token,
+                    message: Some(m.id.snowflake()),
+                },
+                m,
+            )
+        })
+    }
+    pub async fn followup(
+        &self,
+        wh: &Webhook,
+        f: impl FnOnce(CreateReply) -> CreateReply + Send,
+    ) -> Result<(InteractionResponseIdentifier, Message)> {
+        wh.request(self.followup_request(f)).await
+    }
+}
+
 impl Resource<Message> for InteractionResponseIdentifier {
+    type Client = Webhook;
+
     fn uri(&self) -> String {
         let id = self
             .message

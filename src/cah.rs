@@ -2,10 +2,7 @@ use async_trait::async_trait;
 
 use crate::game::{Flow, Game, GameMessage, GameUI, Logic, Setup, SetupOption};
 
-use discord::{
-    interaction::{Interaction, MessageComponent},
-    request::Discord,
-};
+use discord::interaction::{Interaction, MessageComponent};
 
 pub struct CAH {
     setup: Setup,
@@ -13,13 +10,8 @@ pub struct CAH {
 
 #[async_trait]
 impl Logic<()> for CAH {
-    async fn logic(
-        &mut self,
-        client: &Discord,
-        ui: &mut GameUI,
-        i: Interaction<MessageComponent>,
-    ) -> Flow<()> {
-        self.setup.logic(client, ui, i).await?;
+    async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> Flow<()> {
+        self.setup.logic(ui, i).await?;
         Flow::Return(())
     }
 }

@@ -1,5 +1,6 @@
 use std::{collections::HashMap, marker::PhantomData, sync::Arc, time::Duration};
 
+use async_trait::async_trait;
 use isahc::{
     http::{Method, StatusCode},
     AsyncReadResponseExt,
@@ -7,8 +8,8 @@ use isahc::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
 
-pub struct Request<T, O = T, F: FnOnce(T) -> O = fn(T) -> O> {
-    phantom: PhantomData<fn() -> T>,
+pub struct Request<T, C: Client + ?Sized = Discord, O = T, F: FnOnce(T) -> O = fn(T) -> O> {
+    phantom: PhantomData<fn(&C) -> T>,
     pub method: Method,
     pub uri: String,
     pub body: Option<String>,
@@ -38,7 +39,7 @@ pub enum RequestError {
 
 pub type Result<T> = ::std::result::Result<T, RequestError>;
 
-impl<T> Request<T> {
+impl<T, C: Client + ?Sized> Request<T, C> {
     pub fn get(uri: String) -> Self {
         Request {
             phantom: PhantomData,
@@ -80,14 +81,14 @@ impl<T> Request<T> {
     }
 }
 
-impl<T, F: FnOnce(T) -> O, O> Request<T, O, F> {
-    pub fn map<F2, O2>(self, f: F2) -> Request<T, O2, impl FnOnce(T) -> O2>
+impl<T, F: FnOnce(T) -> O, O, C: Client + ?Sized> Request<T, C, O, F> {
+    pub fn map<F2, O2>(self, f: F2) -> Request<T, C, O2, impl FnOnce(T) -> O2>
     where
         F2: (FnOnce(O) -> O2),
     {
         let f1 = self.map;
         Request {
-            phantom: PhantomData,
+            phantom: self.phantom,
             method: self.method,
             uri: self.uri,
             body: self.body,
@@ -134,6 +135,30 @@ impl DiscordRateLimits {
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[async_trait]
+pub trait Client: Sync {
+    async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O + Send, O>(
+        &self,
+        request: Request<T, Self, O, F>,
+    ) -> Result<O>;
+    async fn request<T: DeserializeOwned, F: FnOnce(T) -> O + Send, O>(
+        &self,
+        request: Request<T, Self, O, F>,
+    ) -> Result<O> {
+        self.request_weak(request).await
+        // loop {
+        //     match self.request_weak(&request).await {
+        //         Err(RequestError::RateLimited) => (),
+        //         Err(RequestError::Network) => {
+        //             // TODO: retry
+        //             todo!("network error");
+        //         }
+        //         r => break r,
+        //     }
+        // }
+    }
+}
+
 impl Discord {
     pub fn new<S: Into<String>>(token: S) -> Self {
         Self {
@@ -167,10 +192,13 @@ impl Discord {
     pub fn token(&self) -> &str {
         &self.token
     }
+}
 
-    pub async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O, O>(
+#[async_trait]
+impl Client for Discord {
+    async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O + Send, O>(
         &self,
-        request: Request<T, O, F>,
+        request: Request<T, Self, O, F>,
     ) -> Result<O> {
         let bucket = Discord::get_bucket(&request.uri);
 
@@ -303,22 +331,5 @@ impl Discord {
 
         let f = request.map;
         Ok(f(t))
-    }
-
-    pub async fn request<T: DeserializeOwned, F: FnOnce(T) -> O, O>(
-        &self,
-        request: Request<T, O, F>,
-    ) -> Result<O> {
-        self.request_weak(request).await
-        // loop {
-        //     match self.request_weak(&request).await {
-        //         Err(RequestError::RateLimited) => (),
-        //         Err(RequestError::Network) => {
-        //             // TODO: retry
-        //             todo!("network error");
-        //         }
-        //         r => break r,
-        //     }
-        // }
     }
 }

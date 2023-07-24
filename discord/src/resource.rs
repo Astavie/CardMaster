@@ -3,6 +3,8 @@ use std::{any::type_name, fmt, marker::PhantomData, num::ParseIntError};
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use crate::request::Client;
+
 use super::request::{Discord, Request, Result};
 
 #[derive(Deserialize, Serialize)]
@@ -74,13 +76,15 @@ pub trait Resource<T>
 where
     T: DeserializeOwned,
 {
+    type Client: Client + ?Sized = Discord;
+
     fn uri(&self) -> String;
 
-    fn get_request(&self) -> Request<T> {
+    fn get_request(&self) -> Request<T, Self::Client> {
         Request::get(self.uri())
     }
 
-    async fn get(&self, client: &Discord) -> Result<T> {
+    async fn get(&self, client: &Self::Client) -> Result<T> {
         client.request(self.get_request()).await
     }
 }
@@ -91,12 +95,12 @@ where
     T: DeserializeOwned,
     B: Default + Serialize,
 {
-    fn patch_request(&self, f: impl FnOnce(B) -> B) -> Request<T> {
+    fn patch_request(&self, f: impl FnOnce(B) -> B) -> Request<T, Self::Client> {
         let builder = f(B::default());
         Request::patch(self.uri(), &builder)
     }
 
-    async fn patch(&self, client: &Discord, f: impl FnOnce(B) -> B + Send) -> Result<T> {
+    async fn patch(&self, client: &Self::Client, f: impl FnOnce(B) -> B + Send) -> Result<T> {
         client.request(self.patch_request(f)).await
     }
 }
@@ -107,7 +111,7 @@ where
     T: DeserializeOwned,
     B: Default + Serialize,
 {
-    async fn edit(&mut self, client: &Discord, f: impl FnOnce(B) -> B + Send) -> Result<()>;
+    async fn edit(&mut self, client: &Self::Client, f: impl FnOnce(B) -> B + Send) -> Result<()>;
 }
 
 #[async_trait]
@@ -117,7 +121,7 @@ where
     T: DeserializeOwned + Into<Self>,
     B: Default + Serialize,
 {
-    async fn edit(&mut self, client: &Discord, f: impl FnOnce(B) -> B + Send) -> Result<()> {
+    async fn edit(&mut self, client: &Self::Client, f: impl FnOnce(B) -> B + Send) -> Result<()> {
         *self = self.patch(client, f).await?.into();
         Ok(())
     }

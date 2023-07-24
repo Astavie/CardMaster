@@ -2,6 +2,8 @@ use async_trait::async_trait;
 use partial_id::Partial;
 use serde::Deserialize;
 
+use crate::request::Client;
+
 use super::request::Discord;
 use super::{
     message::{CreateMessage, Message},

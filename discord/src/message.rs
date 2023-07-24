@@ -5,6 +5,8 @@ use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use crate::request::Client;
+
 use super::request::{Discord, Request, Result};
 use super::{
     channel::Channel,
