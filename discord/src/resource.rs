@@ -8,7 +8,7 @@ use super::request::{Discord, Request, Result};
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct Snowflake<T> {
-    phantom: PhantomData<T>,
+    phantom: PhantomData<fn() -> T>,
     id: u64,
 }
 
@@ -72,7 +72,7 @@ impl<T> fmt::Display for Snowflake<T> {
 #[async_trait]
 pub trait Resource<T>
 where
-    T: DeserializeOwned + Unpin + Send + Sync,
+    T: DeserializeOwned,
 {
     fn uri(&self) -> String;
 
@@ -88,7 +88,7 @@ where
 #[async_trait]
 pub trait Patchable<T, B>: Resource<T>
 where
-    T: DeserializeOwned + Unpin + Send + Sync,
+    T: DeserializeOwned,
     B: Default + Serialize,
 {
     fn patch_request(&self, f: impl FnOnce(B) -> B) -> Request<T> {
@@ -104,7 +104,7 @@ where
 #[async_trait]
 pub trait Editable<T, B>: Patchable<T, B>
 where
-    T: DeserializeOwned + Unpin + Send + Sync,
+    T: DeserializeOwned,
     B: Default + Serialize,
 {
     async fn edit(&mut self, client: &Discord, f: impl FnOnce(B) -> B + Send) -> Result<()>;
@@ -113,8 +113,8 @@ where
 #[async_trait]
 impl<S, T, B> Editable<T, B> for S
 where
-    S: Patchable<T, B> + Send + Sync,
-    T: DeserializeOwned + Unpin + Send + Sync + Into<Self>,
+    S: Patchable<T, B> + Sync + Send,
+    T: DeserializeOwned + Into<Self>,
     B: Default + Serialize,
 {
     async fn edit(&mut self, client: &Discord, f: impl FnOnce(B) -> B + Send) -> Result<()> {
@@ -126,7 +126,7 @@ where
 #[async_trait]
 pub trait Deletable<T>: Resource<T> + Sized
 where
-    T: DeserializeOwned + Unpin + Send + Sync,
+    T: DeserializeOwned,
 {
     fn delete_request(self) -> Request<()> {
         Request::delete(self.uri())

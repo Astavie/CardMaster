@@ -93,32 +93,57 @@ pub enum ButtonStyle {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ActionRowComponent {
-    #[serde(rename = 2)]
-    Button {
+#[serde(untagged)]
+pub enum Button {
+    Action {
         style: ButtonStyle,
-        custom_id: Option<String>,
+        custom_id: String,
         label: Option<String>,
         #[serde(skip_serializing_if = "std::ops::Not::not", default)]
         disabled: bool,
     },
-    #[serde(rename = 3)]
-    TextSelectMenu {
-        custom_id: String,
-        options: Vec<SelectOption>,
+    Link {
+        style: MustBe!(5u64),
+        url: String,
+        label: Option<String>,
         #[serde(skip_serializing_if = "std::ops::Not::not", default)]
         disabled: bool,
     },
 }
 
+const fn _default_1() -> usize {
+    1
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TextSelectMenu {
+    pub custom_id: String,
+    pub options: Vec<SelectOption>,
+    pub placeholder: Option<String>,
+    #[serde(default = "_default_1")]
+    pub min_values: usize,
+    #[serde(default = "_default_1")]
+    pub max_values: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub disabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ActionRowComponent {
+    #[serde(rename = 2)]
+    Button(Button),
+    #[serde(rename = 3)]
+    TextSelectMenu(TextSelectMenu),
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SelectOption {
-    label: String,
-    value: String,
-    description: Option<String>,
+    pub label: String,
+    pub value: String,
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
-    default: bool,
+    pub default: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -127,8 +152,11 @@ pub struct Author {
 }
 
 impl Author {
-    pub fn new(name: String) -> Self {
-        Self { name }
+    pub fn new<S>(name: S) -> Self
+    where
+        S: Into<String>,
+    {
+        Self { name: name.into() }
     }
 }
 
@@ -142,17 +170,25 @@ pub struct Field {
 }
 
 impl Field {
-    pub fn new(name: String, value: String) -> Self {
+    pub fn new<S1, S2>(name: S1, value: S2) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+    {
         Self {
-            name,
-            value,
+            name: name.into(),
+            value: value.into(),
             inline: false,
         }
     }
-    pub fn inlined(name: String, value: String) -> Self {
+    pub fn inlined<S1, S2>(name: S1, value: S2) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+    {
         Self {
-            name,
-            value,
+            name: name.into(),
+            value: value.into(),
             inline: true,
         }
     }

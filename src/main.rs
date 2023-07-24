@@ -1,4 +1,5 @@
 #![feature(try_trait_v2)]
+#![feature(exhaustive_patterns)]
 
 use async_trait::async_trait;
 use cah::CAH;
@@ -41,7 +42,7 @@ async fn on_command(
             "ping" => {
                 command
                     .token
-                    .reply(client, |m| m.content("hurb".to_owned()))
+                    .reply(|m| m.content("hurb".to_owned()))
                     .await?;
             }
             "play" => {

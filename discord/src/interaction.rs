@@ -1,15 +1,20 @@
+use std::mem;
+
 use async_trait::async_trait;
 use derive_setters::Setters;
 use enumset::{EnumSet, EnumSetType};
-use serde::{Deserialize, Deserializer, Serialize};
+use isahc::{http::StatusCode, AsyncReadResponseExt};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+
+use crate::request::RequestError;
 
 use super::{
     application::Application,
     channel::Channel,
     command::CommandIdentifier,
     message::{ActionRow, Embed, Message, PatchMessage},
-    request::{Discord, Request, Result},
+    request::{Request, Result},
     resource::{Deletable, Patchable, Resource, Snowflake},
     user::User,
 };
@@ -21,7 +26,7 @@ pub enum AnyInteraction {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Interaction<T> {
+pub struct Interaction<T: 'static> {
     pub data: T,
 
     #[serde(flatten)]
@@ -31,10 +36,23 @@ pub struct Interaction<T> {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct InteractionToken<T> {
+pub struct InteractionToken<T: 'static> {
     id: Snowflake<Interaction<T>>,
     token: String,
     application_id: Snowflake<Application>,
+}
+
+impl<T: 'static> Drop for InteractionToken<T> {
+    fn drop(&mut self) {
+        let clone = Self {
+            id: self.id,
+            token: self.token.clone(),
+            application_id: self.application_id,
+        };
+        tokio::spawn(async move {
+            let _ = clone.deferred_update().await;
+        });
+    }
 }
 
 #[derive(Default, Setters, Serialize)]
@@ -64,61 +82,181 @@ struct Response<T> {
     data: T,
 }
 
-#[async_trait]
-pub trait InteractionResource<T> {
-    fn token(&self) -> &InteractionToken<T>;
+async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O, O>(
+    request: Request<T, O, F>,
+) -> Result<O> {
+    // send request
+    let http = isahc::Request::builder()
+        .method(request.method.clone())
+        .uri("https://discord.com/api/v10".to_owned() + &request.uri);
 
-    fn reply_request(&self, f: impl FnOnce(CreateReply) -> CreateReply) -> Request<()> {
-        let reply = f(CreateReply::default());
+    let mut response = if let Some(body) = request.body.as_ref() {
+        let request = http
+            .header("Content-Type", "application/json")
+            .body(body.clone())
+            .unwrap();
+        println!("{}", request.body());
+        isahc::send_async(request)
+    } else {
+        let request = http.body(()).unwrap();
+        isahc::send_async(request)
+    }
+    .await
+    .map_err(|err| {
+        if err.is_client() || err.is_server() || err.is_tls() {
+            RequestError::Authorization
+        } else {
+            RequestError::Network
+        }
+    })?;
+
+    // check errors
+    if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        return Err(RequestError::RateLimited);
+    }
+
+    let string = response.text().await.unwrap();
+    println!("{}", string);
+
+    if response.status().is_client_error() {
+        return Err(RequestError::ClientError(response.status()));
+    }
+
+    if response.status().is_server_error() {
+        return Err(RequestError::ServerError);
+    }
+
+    let t: T = if response.status() == StatusCode::NO_CONTENT {
+        serde_json::from_str("null").unwrap()
+    } else {
+        serde_json::from_str(&string).map_err(|e| {
+            println!("{}", e);
+            RequestError::ServerError
+        })?
+    };
+
+    let f = request.map;
+    Ok(f(t))
+}
+
+async fn request<T: DeserializeOwned, F: FnOnce(T) -> O, O>(
+    request: Request<T, O, F>,
+) -> Result<O> {
+    request_weak(request).await
+    // loop {
+    //     match request_weak(&request).await {
+    //         Err(RequestError::RateLimited) => (),
+    //         Err(RequestError::Network) => {
+    //             // TODO: retry
+    //             todo!("network error");
+    //         }
+    //         r => break r,
+    //     }
+    // }
+}
+
+impl<T> InteractionToken<T> {
+    fn uri_response(mut self) -> String {
+        let id = self.id;
+        let token = mem::replace(&mut self.token, String::new());
+        mem::forget(self); // do not run the destructor
+        format!("/interactions/{}/{}/callback", id, token)
+    }
+}
+
+#[async_trait]
+pub trait InteractionResource<T: 'static>: Sized {
+    fn token(self) -> InteractionToken<T>;
+
+    // TODO: put InteractionResponseIdentifier into Request
+    fn reply_request(
+        self,
+        f: impl FnOnce(CreateReply) -> CreateReply + Send,
+    ) -> Request<
+        (),
+        InteractionResponseIdentifier,
+        impl FnOnce(()) -> InteractionResponseIdentifier + Send,
+    > {
         let token = self.token();
+        let application_id = token.application_id;
+        let str = token.token.clone();
+
+        let reply = f(CreateReply::default());
         Request::post(
-            format!("/interactions/{}/{}/callback", token.id, token.token),
+            token.uri_response(),
             &Response {
                 typ: 4,
                 data: reply,
             },
         )
-    }
-    async fn reply(
-        &self,
-        client: &Discord,
-        f: impl FnOnce(CreateReply) -> CreateReply + Send,
-    ) -> Result<InteractionResponseIdentifier> {
-        client.request(self.reply_request(f)).await?;
-
-        let token = self.token();
-        Ok(InteractionResponseIdentifier {
-            application_id: token.application_id,
-            token: token.token.clone(),
+        .map(move |_| InteractionResponseIdentifier {
+            application_id,
+            token: str,
             message: None,
         })
     }
+    async fn reply(
+        self,
+        f: impl FnOnce(CreateReply) -> CreateReply + Send,
+    ) -> Result<InteractionResponseIdentifier> {
+        request(self.reply_request(f)).await
+    }
 
     // TODO: put these in a ComponentInteractionResource trait
-    fn update_request(&self, f: impl FnOnce(CreateReply) -> CreateReply) -> Request<()> {
-        let reply = f(CreateReply::default());
+    fn update_request(
+        self,
+        f: impl FnOnce(CreateReply) -> CreateReply,
+    ) -> Request<
+        (),
+        InteractionResponseIdentifier,
+        impl FnOnce(()) -> InteractionResponseIdentifier + Send,
+    > {
         let token = self.token();
+        let application_id = token.application_id;
+        let str = token.token.clone();
+
+        let reply = f(CreateReply::default());
         Request::post(
-            format!("/interactions/{}/{}/callback", token.id, token.token),
+            token.uri_response(),
             &Response {
                 typ: 7,
                 data: reply,
             },
         )
-    }
-    async fn update(
-        &self,
-        client: &Discord,
-        f: impl FnOnce(CreateReply) -> CreateReply + Send,
-    ) -> Result<InteractionResponseIdentifier> {
-        client.request(self.update_request(f)).await?;
-
-        let token = self.token();
-        Ok(InteractionResponseIdentifier {
-            application_id: token.application_id,
-            token: token.token.clone(),
+        .map(move |_| InteractionResponseIdentifier {
+            application_id,
+            token: str,
             message: None,
         })
+    }
+    async fn update(
+        self,
+        f: impl FnOnce(CreateReply) -> CreateReply + Send,
+    ) -> Result<InteractionResponseIdentifier> {
+        request(self.update_request(f)).await
+    }
+
+    fn deferred_update_request(
+        self,
+    ) -> Request<
+        (),
+        InteractionResponseIdentifier,
+        impl FnOnce(()) -> InteractionResponseIdentifier + Send,
+    > {
+        let token = self.token();
+        let application_id = token.application_id;
+        let str = token.token.clone();
+
+        Request::post(token.uri_response(), &Response { typ: 7, data: () }).map(move |_| {
+            InteractionResponseIdentifier {
+                application_id,
+                token: str,
+                message: None,
+            }
+        })
+    }
+    async fn deferred_update(self) -> Result<InteractionResponseIdentifier> {
+        request(self.deferred_update_request()).await
     }
 }
 
@@ -147,14 +285,14 @@ impl Patchable<Message, PatchMessage> for InteractionResponseIdentifier {}
 impl Deletable<Message> for InteractionResponseIdentifier {}
 
 impl<T> InteractionResource<T> for InteractionToken<T> {
-    fn token(&self) -> &InteractionToken<T> {
+    fn token(self) -> InteractionToken<T> {
         self
     }
 }
 
 impl<T> InteractionResource<T> for Interaction<T> {
-    fn token(&self) -> &InteractionToken<T> {
-        &self.token
+    fn token(self) -> InteractionToken<T> {
+        self.token
     }
 }
 

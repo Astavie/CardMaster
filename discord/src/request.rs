@@ -7,11 +7,12 @@ use isahc::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
 
-pub struct Request<T> {
-    phantom: PhantomData<T>,
+pub struct Request<T, O = T, F: FnOnce(T) -> O = fn(T) -> O> {
+    phantom: PhantomData<fn() -> T>,
     pub method: Method,
     pub uri: String,
     pub body: Option<String>,
+    pub map: F,
 }
 
 #[derive(Debug)]
@@ -44,6 +45,7 @@ impl<T> Request<T> {
             method: Method::GET,
             uri,
             body: None,
+            map: |t| t,
         }
     }
 
@@ -53,6 +55,7 @@ impl<T> Request<T> {
             method: Method::POST,
             uri,
             body: Some(serde_json::to_string(body).unwrap()),
+            map: |t| t,
         }
     }
 
@@ -62,6 +65,7 @@ impl<T> Request<T> {
             method: Method::PATCH,
             uri,
             body: Some(serde_json::to_string(body).unwrap()),
+            map: |t| t,
         }
     }
 
@@ -71,6 +75,23 @@ impl<T> Request<T> {
             method: Method::DELETE,
             uri,
             body: None,
+            map: |t| t,
+        }
+    }
+}
+
+impl<T, F: FnOnce(T) -> O, O> Request<T, O, F> {
+    pub fn map<F2, O2>(self, f: F2) -> Request<T, O2, impl FnOnce(T) -> O2>
+    where
+        F2: (FnOnce(O) -> O2),
+    {
+        let f1 = self.map;
+        Request {
+            phantom: PhantomData,
+            method: self.method,
+            uri: self.uri,
+            body: self.body,
+            map: move |t| f(f1(t)),
         }
     }
 }
@@ -147,10 +168,10 @@ impl Discord {
         &self.token
     }
 
-    pub async fn request_weak<T: DeserializeOwned + Unpin + Send + Sync>(
+    pub async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O, O>(
         &self,
-        request: &Request<T>,
-    ) -> Result<T> {
+        request: Request<T, O, F>,
+    ) -> Result<O> {
         let bucket = Discord::get_bucket(&request.uri);
 
         // rate limits
@@ -271,27 +292,33 @@ impl Discord {
             return Err(RequestError::ServerError);
         }
 
-        if response.status() == StatusCode::NO_CONTENT {
-            Ok(serde_json::from_str("null").unwrap())
+        let t: T = if response.status() == StatusCode::NO_CONTENT {
+            serde_json::from_str("null").unwrap()
         } else {
             serde_json::from_str(&string).map_err(|e| {
                 println!("{}", e);
                 RequestError::ServerError
-            })
-        }
+            })?
+        };
+
+        let f = request.map;
+        Ok(f(t))
     }
 
-    pub async fn request<T: DeserializeOwned + Unpin + Send + Sync>(
+    pub async fn request<T: DeserializeOwned, F: FnOnce(T) -> O, O>(
         &self,
-        request: Request<T>,
-    ) -> Result<T> {
-        match self.request_weak(&request).await {
-            Err(RequestError::RateLimited) => self.request_weak(&request).await,
-            Err(RequestError::Network) => {
-                // TODO: retry
-                todo!("network error");
-            }
-            r => r,
-        }
+        request: Request<T, O, F>,
+    ) -> Result<O> {
+        self.request_weak(request).await
+        // loop {
+        //     match self.request_weak(&request).await {
+        //         Err(RequestError::RateLimited) => (),
+        //         Err(RequestError::Network) => {
+        //             // TODO: retry
+        //             todo!("network error");
+        //         }
+        //         r => break r,
+        //     }
+        // }
     }
 }

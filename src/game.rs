@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    format,
+    convert, format,
     ops::{ControlFlow, FromResidual, Try},
 };
 
@@ -14,8 +14,8 @@ use discord::{
         ReplyFlag,
     },
     message::{
-        ActionRow, ActionRowComponent, Author, ButtonStyle, Embed, Field, Message,
-        MessageIdentifier, MessageResource,
+        ActionRow, ActionRowComponent, Author, Button, ButtonStyle, Embed, Field, Message,
+        MessageIdentifier, MessageResource, SelectOption, TextSelectMenu,
     },
     request::{Discord, Result},
     resource::{Patchable, Resource, Snowflake},
@@ -28,7 +28,7 @@ pub struct InteractionDispatcher {
 
 pub struct GameTask {
     ui: GameUI,
-    game: Box<dyn Logic<()> + Send>,
+    game: Box<dyn Logic<()>>,
 }
 
 impl InteractionDispatcher {
@@ -118,11 +118,10 @@ impl GameUI {
     }
     pub async fn reply(
         &self,
-        client: &Discord,
         i: InteractionToken<MessageComponent>,
         message: GameMessage,
     ) -> Result<()> {
-        i.reply(client, |m| {
+        i.reply(|m| {
             m.embeds(vec![message.embed])
                 .components(message.components)
                 .flags(ReplyFlag::Ephemeral.into())
@@ -132,14 +131,11 @@ impl GameUI {
     }
     pub async fn update(
         &self,
-        client: &Discord,
         i: InteractionToken<MessageComponent>,
         message: GameMessage,
     ) -> Result<()> {
-        i.update(client, |m| {
-            m.embeds(vec![message.embed]).components(message.components)
-        })
-        .await?;
+        i.update(|m| m.embeds(vec![message.embed]).components(message.components))
+            .await?;
         Ok(())
     }
 }
@@ -161,7 +157,7 @@ impl<T> Flow<T> {
 
 impl<T> Try for Flow<T> {
     type Output = T;
-    type Residual = Flow<T>;
+    type Residual = Flow<convert::Infallible>;
 
     fn from_output(output: Self::Output) -> Self {
         Self::Return(output)
@@ -169,15 +165,27 @@ impl<T> Try for Flow<T> {
 
     fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
         match self {
-            Self::Return(t) => ControlFlow::Continue(t),
-            _ => ControlFlow::Break(self),
+            Flow::Return(t) => ControlFlow::Continue(t),
+            Flow::Continue => ControlFlow::Break(Flow::Continue),
+            Flow::Exit => ControlFlow::Break(Flow::Exit),
         }
     }
 }
 
 impl<T> FromResidual for Flow<T> {
-    fn from_residual(residual: <Self as Try>::Residual) -> Self {
-        residual
+    fn from_residual(residual: Flow<convert::Infallible>) -> Self {
+        match residual {
+            Flow::Continue => Flow::Continue,
+            Flow::Exit => Flow::Exit,
+        }
+    }
+}
+
+impl<T> FromResidual<Option<convert::Infallible>> for Flow<T> {
+    fn from_residual(residual: Option<convert::Infallible>) -> Self {
+        match residual {
+            None => Flow::Continue,
+        }
     }
 }
 
@@ -192,7 +200,7 @@ pub trait Logic<T> {
 }
 
 #[async_trait]
-pub trait Game: Logic<()> + Sized + Send + 'static {
+pub trait Game: Logic<()> + Sized + 'static {
     const NAME: &'static str;
     const COLOR: u32;
 
@@ -208,9 +216,7 @@ pub trait Game: Logic<()> + Sized + Send + 'static {
         // send lobby message
         let msg = me.lobby_msg_reply();
         let msg = token
-            .reply(client, |m| {
-                m.embeds(vec![msg.embed]).components(msg.components)
-            })
+            .reply(|m| m.embeds(vec![msg.embed]).components(msg.components))
             .await?
             .get(client)
             .await?;
@@ -232,7 +238,7 @@ pub trait Game: Logic<()> + Sized + Send + 'static {
     fn message(fields: Vec<Field>, components: Vec<ActionRow>) -> GameMessage {
         GameMessage {
             embed: Embed::default()
-                .author(Author::new(Self::NAME.to_owned()))
+                .author(Author::new(Self::NAME))
                 .fields(fields)
                 .color(Self::COLOR),
             components,
@@ -244,40 +250,90 @@ pub struct Setup {
     pub options: Vec<(String, SetupOption)>,
 }
 
+const B64_TABLE: [char; 64] = [
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
+    'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
+    'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4',
+    '5', '6', '7', '8', '9', '+', '/',
+];
+
 impl Setup {
     pub fn render(&self) -> Vec<ActionRow> {
         self.options
             .iter()
-            .map(|op| ActionRow {
+            .enumerate()
+            .map(|(oi, (name, option))| ActionRow {
                 typ: MustBeU64::<1>,
-                components: match op.1 {
-                    SetupOption::MultiSelect(_) => todo!(),
-                    SetupOption::Flags(_) => todo!(),
-                    SetupOption::Number(min, max, val) => vec![
-                        ActionRowComponent::Button {
+                components: match *option {
+                    SetupOption::MultiSelect(ref menu) => {
+                        assert!(menu.len() <= 64);
+                        vec![ActionRowComponent::TextSelectMenu(TextSelectMenu {
+                            custom_id: format!("{}", B64_TABLE[oi]),
+                            options: menu
+                                .iter()
+                                .enumerate()
+                                .map(|(i, &(ref name, enabled))| SelectOption {
+                                    label: name.clone(),
+                                    value: format!("{}", B64_TABLE[i]),
+                                    description: None,
+                                    default: enabled,
+                                })
+                                .collect(),
+                            placeholder: Some(name.clone()),
+                            min_values: 0,
+                            max_values: menu.len(),
+                            disabled: false,
+                        })]
+                    }
+                    SetupOption::Flags(ref menu) => {
+                        assert!(menu.len() <= 4);
+                        let mut buttons = vec![ActionRowComponent::Button(Button::Action {
                             style: ButtonStyle::Primary,
-                            custom_id: Some(format!("{}_label", op.0)),
-                            label: Some(op.0.clone()),
+                            custom_id: format!("_label_{}", B64_TABLE[oi]),
+                            label: Some(name.clone()),
                             disabled: true,
-                        },
-                        ActionRowComponent::Button {
+                        })];
+                        buttons.extend(menu.iter().enumerate().map(|(i, &(ref name, enabled))| {
+                            ActionRowComponent::Button(Button::Action {
+                                style: if enabled {
+                                    // Green
+                                    ButtonStyle::Success
+                                } else {
+                                    // Gray
+                                    ButtonStyle::Secondary
+                                },
+                                custom_id: format!("{}{}", B64_TABLE[oi], B64_TABLE[i]),
+                                label: Some(name.clone()),
+                                disabled: false,
+                            })
+                        }));
+                        buttons
+                    }
+                    SetupOption::Number(min, max, val) => vec![
+                        ActionRowComponent::Button(Button::Action {
                             style: ButtonStyle::Primary,
-                            custom_id: Some(format!("{}_sub", op.0)),
+                            custom_id: format!("_label_{}", B64_TABLE[oi]),
+                            label: Some(name.clone()),
+                            disabled: true,
+                        }),
+                        ActionRowComponent::Button(Button::Action {
+                            style: ButtonStyle::Primary,
+                            custom_id: format!("{}d", B64_TABLE[oi]),
                             label: Some("<".to_owned()),
                             disabled: val <= min,
-                        },
-                        ActionRowComponent::Button {
+                        }),
+                        ActionRowComponent::Button(Button::Action {
                             style: ButtonStyle::Secondary,
-                            custom_id: Some(format!("{}_value", op.0)),
+                            custom_id: format!("{}v", B64_TABLE[oi]),
                             label: Some(val.to_string()),
                             disabled: false,
-                        },
-                        ActionRowComponent::Button {
+                        }),
+                        ActionRowComponent::Button(Button::Action {
                             style: ButtonStyle::Primary,
-                            custom_id: Some(format!("{}_add", op.0)),
+                            custom_id: format!("{}i", B64_TABLE[oi]),
                             label: Some(">".to_owned()),
                             disabled: val >= max,
-                        },
+                        }),
                     ],
                 },
             })
@@ -291,30 +347,48 @@ impl Logic<()> for Setup {
         &mut self,
         client: &Discord,
         ui: &mut GameUI,
-        i: Interaction<MessageComponent>,
+        it: Interaction<MessageComponent>,
     ) -> Flow<()> {
         // update state
-        for option in self.options.iter_mut() {
-            match &mut option.1 {
-                SetupOption::MultiSelect(_) => todo!(),
-                SetupOption::Flags(_) => todo!(),
-                SetupOption::Number(min, max, val) => {
-                    if i.data.custom_id == format!("{}_sub", option.0) {
-                        *val = (*min).max(*val - 1);
-                        break;
-                    } else if i.data.custom_id == format!("{}_add", option.0) {
-                        *val = (*max).min(*val + 1);
-                        break;
-                    }
+        let mut chars = it.data.custom_id.chars();
+        let ob = chars.next()?;
+        let oi = B64_TABLE.iter().position(|&c| c == ob)?;
+        let option = &mut self.options.get_mut(oi)?.1;
+
+        match *option {
+            SetupOption::MultiSelect(ref mut menu) => {
+                for (_, option) in menu.iter_mut() {
+                    *option = false;
+                }
+                for select in it.data.values {
+                    let Some(b) = select.value.chars().next() else { continue };
+                    let Some(i) = B64_TABLE.iter().position(|&c| c == b) else { continue };
+                    let Some(option) = menu.get_mut(i).map(|(_, b)| b) else { continue };
+                    *option = true;
                 }
             }
+            SetupOption::Flags(ref mut menu) => {
+                let b = chars.next()?;
+                let i = B64_TABLE.iter().position(|&c| c == b)?;
+                let option = &mut menu.get_mut(i)?.1;
+                *option = !*option;
+            }
+            SetupOption::Number(min, max, ref mut val) => match chars.next()? {
+                'd' if *val > min => {
+                    *val = *val - 1;
+                }
+                'i' if *val < max => {
+                    *val = *val + 1;
+                }
+                _ => None?,
+            },
         }
 
         // rerender
-        let mut msg: GameMessage = i.data.message.into();
+        let mut msg: GameMessage = it.data.message.into();
         msg.components = self.render();
 
-        ui.update(client, i.token, msg).await.unwrap();
+        ui.update(it.token, msg).await.unwrap();
         Flow::Continue
     }
 }
