@@ -2,8 +2,6 @@ use async_trait::async_trait;
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::request::Client;
-
 use super::request::Discord;
 use super::{
     message::{CreateMessage, Message},
@@ -34,7 +32,7 @@ pub trait ChannelResource {
         client: &Discord,
         f: impl FnOnce(CreateMessage) -> CreateMessage + Send,
     ) -> Result<Message> {
-        client.request(self.send_message_request(f)).await
+        self.send_message_request(f).request(client).await
     }
 }
 

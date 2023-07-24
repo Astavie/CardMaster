@@ -3,7 +3,10 @@ use std::mem;
 use async_trait::async_trait;
 use derive_setters::Setters;
 use enumset::{EnumSet, EnumSetType};
-use isahc::{http::StatusCode, AsyncReadResponseExt};
+use isahc::{
+    http::{Method, StatusCode},
+    AsyncReadResponseExt,
+};
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -86,16 +89,18 @@ pub struct Webhook;
 
 #[async_trait]
 impl Client for Webhook {
-    async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O + Send, O>(
+    async fn request_weak<T: DeserializeOwned>(
         &self,
-        request: Request<T, Self, O, F>,
-    ) -> Result<O> {
+        method: Method,
+        uri: &str,
+        body: Option<&str>,
+    ) -> Result<T> {
         // send request
         let http = isahc::Request::builder()
-            .method(request.method.clone())
-            .uri("https://discord.com/api/v10".to_owned() + &request.uri);
+            .method(method)
+            .uri("https://discord.com/api/v10".to_owned() + uri);
 
-        let mut response = if let Some(body) = request.body.as_ref() {
+        let mut response = if let Some(body) = body {
             let request = http
                 .header("Content-Type", "application/json")
                 .body(body.clone())
@@ -131,17 +136,14 @@ impl Client for Webhook {
             return Err(RequestError::ServerError);
         }
 
-        let t: T = if response.status() == StatusCode::NO_CONTENT {
-            serde_json::from_str("null").unwrap()
+        if response.status() == StatusCode::NO_CONTENT {
+            Ok(serde_json::from_str("null").unwrap())
         } else {
             serde_json::from_str(&string).map_err(|e| {
                 println!("{}", e);
                 RequestError::ServerError
-            })?
-        };
-
-        let f = request.map;
-        Ok(f(t))
+            })
+        }
     }
 }
 
@@ -188,10 +190,10 @@ pub trait InteractionResource<T: 'static>: Sized {
     }
     async fn reply(
         self,
-        wh: &Webhook,
+        client: &Webhook,
         f: impl FnOnce(CreateReply) -> CreateReply + Send,
     ) -> Result<InteractionResponseIdentifier> {
-        wh.request(self.reply_request(f)).await
+        self.reply_request(f).request(client).await
     }
 
     // TODO: put these in a ComponentInteractionResource trait
@@ -224,10 +226,10 @@ pub trait InteractionResource<T: 'static>: Sized {
     }
     async fn update(
         self,
-        wh: &Webhook,
+        client: &Webhook,
         f: impl FnOnce(CreateReply) -> CreateReply + Send,
     ) -> Result<InteractionResponseIdentifier> {
-        wh.request(self.update_request(f)).await
+        self.update_request(f).request(client).await
     }
 
     fn deferred_update_request(
@@ -250,8 +252,8 @@ pub trait InteractionResource<T: 'static>: Sized {
             }
         })
     }
-    async fn deferred_update(self, wh: &Webhook) -> Result<InteractionResponseIdentifier> {
-        wh.request(self.deferred_update_request()).await
+    async fn deferred_update(self, client: &Webhook) -> Result<InteractionResponseIdentifier> {
+        self.deferred_update_request().request(client).await
     }
 }
 
@@ -291,10 +293,10 @@ impl InteractionResponseIdentifier {
     }
     pub async fn followup(
         &self,
-        wh: &Webhook,
+        client: &Webhook,
         f: impl FnOnce(CreateReply) -> CreateReply + Send,
     ) -> Result<(InteractionResponseIdentifier, Message)> {
-        wh.request(self.followup_request(f)).await
+        self.followup_request(f).request(client).await
     }
 }
 

@@ -3,8 +3,6 @@ use derive_setters::Setters;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 
-use crate::request::Client;
-
 use super::request::Discord;
 use super::{
     channel::{Channel, ChannelResource},
@@ -45,7 +43,7 @@ pub trait UserResource {
     }
 
     async fn create_dm(&self, client: &Discord) -> Result<Channel> {
-        client.request(self.create_dm_request()).await
+        self.create_dm_request().request(client).await
     }
 
     async fn send_message(

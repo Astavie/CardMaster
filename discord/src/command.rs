@@ -2,8 +2,6 @@ use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::request::Client;
-
 use super::request::Discord;
 use super::{
     application::Application,
@@ -165,14 +163,14 @@ impl Commands {
         Request::post(self.uri(), command)
     }
     pub async fn create(&self, client: &Discord, command: &CommandData) -> Result<Command> {
-        client.request(self.create_request(command)).await
+        self.create_request(command).request(client).await
     }
 
     pub fn all_request(&self) -> Request<Vec<Command>> {
         Request::get(self.uri())
     }
     pub async fn all(&self, client: &Discord) -> Result<Vec<Command>> {
-        client.request(self.all_request()).await
+        self.all_request().request(client).await
     }
 }
 

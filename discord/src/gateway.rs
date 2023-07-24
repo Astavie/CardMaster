@@ -18,8 +18,6 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::request::Client;
-
 use super::request::{self, Request, RequestError};
 use super::{interaction::AnyInteraction, request::Discord};
 
@@ -216,7 +214,7 @@ const NAME: &str = env!("CARGO_PKG_NAME");
 
 impl Gateway {
     pub async fn connect(client: &Discord) -> request::Result<Self> {
-        let GatewayResponse { url } = client.request(Request::get("/gateway".to_owned())).await?;
+        let GatewayResponse { url } = Request::get("/gateway".to_owned()).request(client).await?;
         let full_url = url + "/?v=10&encoding=json";
 
         let (mut ws_stream, _) = connect_async(full_url).await.expect("could not connect");

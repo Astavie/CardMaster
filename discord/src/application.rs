@@ -1,8 +1,6 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::request::Client;
-
 use super::request::Discord;
 use super::{
     command::Commands,
@@ -33,7 +31,7 @@ impl Application {
         Request::get("/oauth2/applications/@me".to_owned())
     }
     pub async fn get(client: &Discord) -> Result<Self> {
-        client.request(Self::get_request()).await
+        Self::get_request().request(client).await
     }
 }
 

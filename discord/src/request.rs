@@ -8,7 +8,12 @@ use isahc::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
 
-pub struct Request<T, C: Client + ?Sized = Discord, O = T, F: FnOnce(T) -> O = fn(T) -> O> {
+pub struct Request<
+    T: DeserializeOwned,
+    C: Client + ?Sized = Discord,
+    O = T,
+    F: FnOnce(T) -> O = fn(T) -> O,
+> {
     phantom: PhantomData<fn(&C) -> T>,
     pub method: Method,
     pub uri: String,
@@ -39,7 +44,7 @@ pub enum RequestError {
 
 pub type Result<T> = ::std::result::Result<T, RequestError>;
 
-impl<T, C: Client + ?Sized> Request<T, C> {
+impl<T: DeserializeOwned, C: Client + ?Sized> Request<T, C> {
     pub fn get(uri: String) -> Self {
         Request {
             phantom: PhantomData,
@@ -81,7 +86,7 @@ impl<T, C: Client + ?Sized> Request<T, C> {
     }
 }
 
-impl<T, F: FnOnce(T) -> O, O, C: Client + ?Sized> Request<T, C, O, F> {
+impl<T: DeserializeOwned, F: FnOnce(T) -> O, O, C: Client + ?Sized> Request<T, C, O, F> {
     pub fn map<F2, O2>(self, f: F2) -> Request<T, C, O2, impl FnOnce(T) -> O2>
     where
         F2: (FnOnce(O) -> O2),
@@ -94,6 +99,21 @@ impl<T, F: FnOnce(T) -> O, O, C: Client + ?Sized> Request<T, C, O, F> {
             body: self.body,
             map: move |t| f(f1(t)),
         }
+    }
+
+    pub async fn request_weak(self, client: &C) -> Result<O> {
+        let t: T = client
+            .request_weak(self.method, &self.uri, self.body.as_deref())
+            .await?;
+        let f = self.map;
+        Ok(f(t))
+    }
+    pub async fn request(self, client: &C) -> Result<O> {
+        let t: T = client
+            .request(self.method, &self.uri, self.body.as_deref())
+            .await?;
+        let f = self.map;
+        Ok(f(t))
     }
 }
 
@@ -137,25 +157,29 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[async_trait]
 pub trait Client: Sync {
-    async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O + Send, O>(
+    async fn request_weak<T: DeserializeOwned>(
         &self,
-        request: Request<T, Self, O, F>,
-    ) -> Result<O>;
-    async fn request<T: DeserializeOwned, F: FnOnce(T) -> O + Send, O>(
+        method: Method,
+        uri: &str,
+        body: Option<&str>,
+    ) -> Result<T>;
+
+    async fn request<T: DeserializeOwned>(
         &self,
-        request: Request<T, Self, O, F>,
-    ) -> Result<O> {
-        self.request_weak(request).await
-        // loop {
-        //     match self.request_weak(&request).await {
-        //         Err(RequestError::RateLimited) => (),
-        //         Err(RequestError::Network) => {
-        //             // TODO: retry
-        //             todo!("network error");
-        //         }
-        //         r => break r,
-        //     }
-        // }
+        method: Method,
+        uri: &str,
+        body: Option<&str>,
+    ) -> Result<T> {
+        loop {
+            match self.request_weak(method.clone(), uri, body).await {
+                Err(RequestError::RateLimited) => (),
+                Err(RequestError::Network) => {
+                    // TODO: retry
+                    todo!("network error");
+                }
+                r => break r,
+            }
+        }
     }
 }
 
@@ -196,11 +220,13 @@ impl Discord {
 
 #[async_trait]
 impl Client for Discord {
-    async fn request_weak<T: DeserializeOwned, F: FnOnce(T) -> O + Send, O>(
+    async fn request_weak<T: DeserializeOwned>(
         &self,
-        request: Request<T, Self, O, F>,
-    ) -> Result<O> {
-        let bucket = Discord::get_bucket(&request.uri);
+        method: Method,
+        uri: &str,
+        body: Option<&str>,
+    ) -> Result<T> {
+        let bucket = Discord::get_bucket(uri);
 
         // rate limits
         let now = {
@@ -210,7 +236,7 @@ impl Client for Discord {
             let mut time = me.retry_after.duration_since(now);
 
             // global rate limit
-            let global = Discord::bound_to_global_limit(&request.uri);
+            let global = Discord::bound_to_global_limit(uri);
             if global && me.request_rate >= GLOBAL_RATE_LIMIT {
                 time = time.max(Duration::from_secs_f32(1.0 / GLOBAL_RATE_LIMIT));
             }
@@ -239,15 +265,15 @@ impl Client for Discord {
 
         // send request
         let http = isahc::Request::builder()
-            .method(request.method.clone())
-            .uri("https://discord.com/api/v10".to_owned() + &request.uri)
+            .method(method)
+            .uri("https://discord.com/api/v10".to_owned() + uri)
             .header(
                 "User-Agent",
                 format!("DiscordBot ({}, {})", "https://astavie.github.io/", VERSION),
             )
             .header("Authorization", "Bot ".to_owned() + &self.token);
 
-        let mut response = if let Some(body) = request.body.as_ref() {
+        let mut response = if let Some(body) = body {
             let request = http
                 .header("Content-Type", "application/json")
                 .body(body.clone())
@@ -320,16 +346,13 @@ impl Client for Discord {
             return Err(RequestError::ServerError);
         }
 
-        let t: T = if response.status() == StatusCode::NO_CONTENT {
-            serde_json::from_str("null").unwrap()
+        if response.status() == StatusCode::NO_CONTENT {
+            Ok(serde_json::from_str("null").unwrap())
         } else {
             serde_json::from_str(&string).map_err(|e| {
                 println!("{}", e);
                 RequestError::ServerError
-            })?
-        };
-
-        let f = request.map;
-        Ok(f(t))
+            })
+        }
     }
 }

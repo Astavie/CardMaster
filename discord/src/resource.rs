@@ -85,7 +85,7 @@ where
     }
 
     async fn get(&self, client: &Self::Client) -> Result<T> {
-        client.request(self.get_request()).await
+        self.get_request().request(client).await
     }
 }
 
@@ -101,7 +101,7 @@ where
     }
 
     async fn patch(&self, client: &Self::Client, f: impl FnOnce(B) -> B + Send) -> Result<T> {
-        client.request(self.patch_request(f)).await
+        self.patch_request(f).request(client).await
     }
 }
 
@@ -132,11 +132,11 @@ pub trait Deletable<T>: Resource<T> + Sized
 where
     T: DeserializeOwned,
 {
-    fn delete_request(self) -> Request<()> {
+    fn delete_request(self) -> Request<(), Self::Client> {
         Request::delete(self.uri())
     }
 
-    async fn delete(self, client: &Discord) -> Result<()> {
-        client.request(self.delete_request()).await
+    async fn delete(self, client: &Self::Client) -> Result<()> {
+        self.delete_request().request(client).await
     }
 }

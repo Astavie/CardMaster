@@ -5,8 +5,6 @@ use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::request::Client;
-
 use super::request::{Discord, Request, Result};
 use super::{
     channel::Channel,
@@ -220,7 +218,7 @@ pub trait MessageResource {
         )
     }
     async fn start_thread(&self, client: &Discord, name: String) -> Result<Channel> {
-        client.request(self.start_thread_request(name)).await
+        self.start_thread_request(name).request(client).await
     }
 }
 
