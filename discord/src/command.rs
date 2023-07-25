@@ -2,12 +2,14 @@ use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use crate::resource::Endpoint;
+
 use super::request::Discord;
 use super::{
     application::Application,
     guild::Guild,
     request::{Request, Result},
-    resource::{Deletable, Resource, Snowflake},
+    resource::{Resource, Snowflake},
 };
 
 #[derive(Debug, Deserialize, Copy, Clone)]
@@ -174,33 +176,17 @@ impl Commands {
     }
 }
 
-pub trait CommandResource {
-    fn endpoint(&self) -> CommandIdentifier;
-}
-
-impl CommandResource for CommandIdentifier {
-    fn endpoint(&self) -> CommandIdentifier {
-        self.clone()
-    }
-}
-
-impl CommandResource for Command {
-    fn endpoint(&self) -> CommandIdentifier {
-        self.id
-    }
-}
-
-impl<T> Resource<Command> for T
-where
-    T: CommandResource,
-{
+impl Endpoint for CommandIdentifier {
+    type Result = Command;
+    type Delete = ();
     fn uri(&self) -> String {
-        format!(
-            "{}/{}",
-            self.endpoint().command_pool.uri(),
-            self.endpoint().command_id
-        )
+        format!("{}/{}", self.command_pool.uri(), self.command_id)
     }
 }
 
-impl<T> Deletable<Command> for T where T: CommandResource {}
+impl Resource for Command {
+    type Endpoint = CommandIdentifier;
+    fn endpoint(&self) -> &Self::Endpoint {
+        &self.id
+    }
+}

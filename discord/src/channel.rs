@@ -2,6 +2,8 @@ use async_trait::async_trait;
 use partial_id::Partial;
 use serde::Deserialize;
 
+use crate::resource::Endpoint;
+
 use super::request::Discord;
 use super::{
     message::{CreateMessage, Message},
@@ -15,16 +17,21 @@ pub struct Channel {
     pub id: Snowflake<Channel>,
 }
 
-#[async_trait]
-pub trait ChannelResource {
-    fn endpoint(&self) -> Snowflake<Channel>;
+impl Endpoint for Snowflake<Channel> {
+    type Result = Channel;
+    fn uri(&self) -> String {
+        format!("/channels/{}", self)
+    }
+}
 
+#[async_trait]
+pub trait ChannelResource: Resource<Endpoint = Snowflake<Channel>> {
     fn send_message_request(
         &self,
         f: impl FnOnce(CreateMessage) -> CreateMessage,
     ) -> Request<Message> {
         let msg = f(CreateMessage::default());
-        Request::post(format!("/channels/{}/messages", self.endpoint()), &msg)
+        Request::post(format!("{}/messages", self.endpoint().uri()), &msg)
     }
 
     async fn send_message(
@@ -36,29 +43,17 @@ pub trait ChannelResource {
     }
 }
 
-impl ChannelResource for Snowflake<Channel> {
-    fn endpoint(&self) -> Snowflake<Channel> {
-        self.clone()
+impl<T> ChannelResource for T where T: Resource<Endpoint = Snowflake<Channel>> {}
+
+impl Resource for Channel {
+    type Endpoint = Snowflake<Channel>;
+    fn endpoint(&self) -> &Self::Endpoint {
+        &self.id
     }
 }
-
-impl ChannelResource for Channel {
-    fn endpoint(&self) -> Snowflake<Channel> {
-        self.id
-    }
-}
-
-impl ChannelResource for PartialChannel {
-    fn endpoint(&self) -> Snowflake<Channel> {
-        self.id
-    }
-}
-
-impl<T> Resource<Channel> for T
-where
-    T: ChannelResource,
-{
-    fn uri(&self) -> String {
-        format!("/channels/{}", self.endpoint())
+impl Resource for PartialChannel {
+    type Endpoint = Snowflake<Channel>;
+    fn endpoint(&self) -> &Self::Endpoint {
+        &self.id
     }
 }

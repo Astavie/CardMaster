@@ -10,7 +10,10 @@ use isahc::{
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-use crate::request::{Client, RequestError};
+use crate::{
+    request::{Client, RequestError},
+    resource::Endpoint,
+};
 
 use super::{
     application::Application,
@@ -18,7 +21,7 @@ use super::{
     command::CommandIdentifier,
     message::{ActionRow, Embed, Message, PatchMessage},
     request::{Request, Result},
-    resource::{Deletable, Patchable, Resource, Snowflake},
+    resource::Snowflake,
     user::User,
 };
 
@@ -137,13 +140,14 @@ impl Client for Webhook {
         }
 
         if response.status() == StatusCode::NO_CONTENT {
-            Ok(serde_json::from_str("null").unwrap())
+            serde_json::from_str("null")
         } else {
-            serde_json::from_str(&string).map_err(|e| {
-                println!("{}", e);
-                RequestError::ServerError
-            })
+            serde_json::from_str(&string)
         }
+        .map_err(|e| {
+            println!("{}", e);
+            RequestError::ServerError
+        })
     }
 }
 
@@ -300,7 +304,10 @@ impl InteractionResponseIdentifier {
     }
 }
 
-impl Resource<Message> for InteractionResponseIdentifier {
+impl Endpoint for InteractionResponseIdentifier {
+    type Result = Message;
+    type Patch = PatchMessage;
+    type Delete = ();
     type Client = Webhook;
 
     fn uri(&self) -> String {
@@ -316,9 +323,6 @@ impl Resource<Message> for InteractionResponseIdentifier {
         )
     }
 }
-
-impl Patchable<Message, PatchMessage> for InteractionResponseIdentifier {}
-impl Deletable<Message> for InteractionResponseIdentifier {}
 
 impl<T> InteractionResource<T> for InteractionToken<T> {
     fn token(self) -> InteractionToken<T> {
@@ -430,20 +434,10 @@ pub struct ApplicationCommand {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct SelectValue {
-    pub label: String,
-    pub value: String,
-    pub description: Option<String>,
-
-    #[serde(default)]
-    pub default: bool,
-}
-
-#[derive(Deserialize, Debug)]
 pub struct MessageComponent {
     pub custom_id: String,
     pub message: Message,
 
     #[serde(default)]
-    pub values: Vec<SelectValue>,
+    pub values: Vec<String>,
 }

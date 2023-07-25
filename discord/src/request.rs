@@ -173,10 +173,7 @@ pub trait Client: Sync {
         loop {
             match self.request_weak(method.clone(), uri, body).await {
                 Err(RequestError::RateLimited) => (),
-                Err(RequestError::Network) => {
-                    // TODO: retry
-                    todo!("network error");
-                }
+                Err(RequestError::Network) => (),
                 r => break r,
             }
         }
@@ -347,12 +344,13 @@ impl Client for Discord {
         }
 
         if response.status() == StatusCode::NO_CONTENT {
-            Ok(serde_json::from_str("null").unwrap())
+            serde_json::from_str("null")
         } else {
-            serde_json::from_str(&string).map_err(|e| {
-                println!("{}", e);
-                RequestError::ServerError
-            })
+            serde_json::from_str(&string)
         }
+        .map_err(|e| {
+            println!("{}", e);
+            RequestError::ServerError
+        })
     }
 }

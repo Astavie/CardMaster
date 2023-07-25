@@ -5,10 +5,12 @@ use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use crate::resource::Endpoint;
+
 use super::request::{Discord, Request, Result};
 use super::{
     channel::Channel,
-    resource::{Deletable, Patchable, Resource, Snowflake},
+    resource::{Resource, Snowflake},
     user::PartialUser,
 };
 
@@ -200,9 +202,7 @@ struct CreateThread {
 }
 
 #[async_trait]
-pub trait MessageResource {
-    fn endpoint(&self) -> MessageIdentifier;
-
+pub trait MessageResource: Resource<Endpoint = MessageIdentifier> {
     fn channel(&self) -> Snowflake<Channel> {
         self.endpoint().channel_id
     }
@@ -222,33 +222,27 @@ pub trait MessageResource {
     }
 }
 
-impl MessageResource for MessageIdentifier {
-    fn endpoint(&self) -> MessageIdentifier {
-        self.clone()
-    }
-}
+impl<T> MessageResource for T where T: Resource<Endpoint = MessageIdentifier> {}
 
-impl MessageResource for Message {
-    fn endpoint(&self) -> MessageIdentifier {
-        self.id
-    }
-}
+impl Endpoint for MessageIdentifier {
+    type Result = Message;
+    type Patch = PatchMessage;
+    type Delete = ();
 
-impl MessageResource for PartialMessage {
-    fn endpoint(&self) -> MessageIdentifier {
-        self.id
-    }
-}
-
-impl<T> Resource<Message> for T
-where
-    T: MessageResource,
-{
     fn uri(&self) -> String {
-        let id = self.endpoint();
-        format!("/channels/{}/messages/{}", id.channel_id, id.message_id)
+        format!("/channels/{}/messages/{}", self.channel_id, self.message_id)
     }
 }
 
-impl<T> Patchable<Message, PatchMessage> for T where T: MessageResource {}
-impl<T> Deletable<Message> for T where T: MessageResource {}
+impl Resource for Message {
+    type Endpoint = MessageIdentifier;
+    fn endpoint(&self) -> &Self::Endpoint {
+        &self.id
+    }
+}
+impl Resource for PartialMessage {
+    type Endpoint = MessageIdentifier;
+    fn endpoint(&self) -> &Self::Endpoint {
+        &self.id
+    }
+}

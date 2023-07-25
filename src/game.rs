@@ -17,6 +17,7 @@ use discord::{
     },
     request::Result,
     resource::{Patchable, Resource, Snowflake},
+    user::User,
 };
 
 pub struct InteractionDispatcher {
@@ -25,7 +26,7 @@ pub struct InteractionDispatcher {
 
 pub struct GameTask {
     ui: GameUI,
-    game: Box<dyn Logic<()>>,
+    game: Box<dyn Logic<Return = ()>>,
 }
 
 impl InteractionDispatcher {
@@ -166,12 +167,17 @@ impl<T> FromResidual<Option<convert::Infallible>> for Flow<T> {
 }
 
 #[async_trait]
-pub trait Logic<T> {
-    async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> Flow<T>;
+pub trait Logic {
+    type Return;
+    async fn logic(
+        &mut self,
+        ui: &mut GameUI,
+        i: Interaction<MessageComponent>,
+    ) -> Flow<Self::Return>;
 }
 
 #[async_trait]
-pub trait Game: Logic<()> + Sized + 'static {
+pub trait Game: Logic<Return = ()> + Sized + 'static {
     const NAME: &'static str;
     const COLOR: u32;
 
@@ -213,6 +219,7 @@ pub trait Game: Logic<()> + Sized + 'static {
 
 pub struct Setup {
     pub options: Vec<(String, SetupOption)>,
+    // pub players: Option<Vec<Snowflake<User>>>,
 }
 
 const B64_TABLE: [char; 64] = [
@@ -224,6 +231,7 @@ const B64_TABLE: [char; 64] = [
 
 impl Setup {
     pub fn render(&self) -> Vec<ActionRow> {
+        assert!(self.options.len() <= 4);
         self.options
             .iter()
             .enumerate()
@@ -307,7 +315,9 @@ impl Setup {
 }
 
 #[async_trait]
-impl Logic<()> for Setup {
+impl Logic for Setup {
+    type Return = ();
+
     async fn logic(&mut self, ui: &mut GameUI, it: Interaction<MessageComponent>) -> Flow<()> {
         // update state
         let mut chars = it.data.custom_id.chars();
@@ -321,7 +331,7 @@ impl Logic<()> for Setup {
                     *option = false;
                 }
                 for select in it.data.values {
-                    let Some(b) = select.value.chars().next() else { continue };
+                    let Some(b) = select.chars().next() else { continue };
                     let Some(i) = B64_TABLE.iter().position(|&c| c == b) else { continue };
                     let Some(option) = menu.get_mut(i).map(|(_, b)| b) else { continue };
                     *option = true;

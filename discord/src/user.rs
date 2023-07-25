@@ -3,12 +3,14 @@ use derive_setters::Setters;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 
+use crate::resource::Endpoint;
+
 use super::request::Discord;
 use super::{
     channel::{Channel, ChannelResource},
     message::{CreateMessage, Message},
     request::{Request, Result},
-    resource::{Patchable, Resource, Snowflake},
+    resource::{Resource, Snowflake},
 };
 
 #[derive(Partial)]
@@ -30,14 +32,12 @@ struct DMRequest {
 }
 
 #[async_trait]
-pub trait UserResource {
-    fn endpoint(&self) -> Snowflake<User>;
-
+pub trait UserResource: Resource<Endpoint = Snowflake<User>> {
     fn create_dm_request(&self) -> Request<Channel> {
         Request::post(
             "/users/@me/channels".to_owned(),
             &DMRequest {
-                recipient_id: self.endpoint(),
+                recipient_id: self.endpoint().clone(),
             },
         )
     }
@@ -56,39 +56,35 @@ pub trait UserResource {
     }
 }
 
-impl UserResource for Snowflake<User> {
-    fn endpoint(&self) -> Snowflake<User> {
-        self.clone()
-    }
-}
+impl<T> UserResource for T where T: Resource<Endpoint = Snowflake<User>> {}
 
-impl UserResource for User {
-    fn endpoint(&self) -> Snowflake<User> {
-        self.id
-    }
-}
-
-impl UserResource for PartialUser {
-    fn endpoint(&self) -> Snowflake<User> {
-        self.id
-    }
-}
-
-impl<T> Resource<User> for T
-where
-    T: UserResource,
-{
+impl Endpoint for Snowflake<User> {
+    type Result = User;
     fn uri(&self) -> String {
-        format!("/users/{}", self.endpoint())
+        format!("/users/{}", self)
     }
 }
 
+impl Resource for User {
+    type Endpoint = Snowflake<User>;
+    fn endpoint(&self) -> &Self::Endpoint {
+        &self.id
+    }
+}
+impl Resource for PartialUser {
+    type Endpoint = Snowflake<User>;
+    fn endpoint(&self) -> &Self::Endpoint {
+        &self.id
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct Me;
 
-impl Resource<User> for Me {
+impl Endpoint for Me {
+    type Result = User;
+    type Patch = PatchUser;
     fn uri(&self) -> String {
         "/users/@me".into()
     }
 }
-
-impl Patchable<User, PatchUser> for Me {}

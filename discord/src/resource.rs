@@ -1,4 +1,4 @@
-use std::{any::type_name, fmt, marker::PhantomData, num::ParseIntError};
+use std::{any::type_name, convert::Infallible, fmt, marker::PhantomData, num::ParseIntError};
 
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -71,72 +71,121 @@ impl<T> fmt::Display for Snowflake<T> {
     }
 }
 
-#[async_trait]
-pub trait Resource<T>
-where
-    T: DeserializeOwned,
-{
+pub trait Endpoint {
+    type Result: DeserializeOwned;
+    type Delete = Infallible;
+    type Patch = Infallible;
+
     type Client: Client + ?Sized = Discord;
-
     fn uri(&self) -> String;
+}
 
-    fn get_request(&self) -> Request<T, Self::Client> {
-        Request::get(self.uri())
+impl<T> Resource for T
+where
+    T: Endpoint,
+{
+    type Endpoint = Self;
+
+    fn endpoint(&self) -> &Self::Endpoint {
+        self
+    }
+}
+
+#[async_trait]
+pub trait Resource {
+    type Endpoint: Endpoint;
+
+    fn endpoint(&self) -> &Self::Endpoint;
+
+    fn get_request(
+        &self,
+    ) -> Request<<Self::Endpoint as Endpoint>::Result, <Self::Endpoint as Endpoint>::Client> {
+        Request::get(self.endpoint().uri())
     }
 
-    async fn get(&self, client: &Self::Client) -> Result<T> {
+    async fn get(
+        &self,
+        client: &<Self::Endpoint as Endpoint>::Client,
+    ) -> Result<<Self::Endpoint as Endpoint>::Result> {
         self.get_request().request(client).await
     }
 }
 
 #[async_trait]
-pub trait Patchable<T, B>: Resource<T>
+pub trait Patchable
 where
-    T: DeserializeOwned,
-    B: Default + Serialize,
+    Self: Resource,
+    <Self::Endpoint as Endpoint>::Patch: Default + Serialize,
 {
-    fn patch_request(&self, f: impl FnOnce(B) -> B) -> Request<T, Self::Client> {
-        let builder = f(B::default());
-        Request::patch(self.uri(), &builder)
+    fn patch_request(
+        &self,
+        f: impl FnOnce(<Self::Endpoint as Endpoint>::Patch) -> <Self::Endpoint as Endpoint>::Patch,
+    ) -> Request<<Self::Endpoint as Endpoint>::Result, <Self::Endpoint as Endpoint>::Client> {
+        let builder = f(<Self::Endpoint as Endpoint>::Patch::default());
+        Request::patch(self.endpoint().uri(), &builder)
     }
 
-    async fn patch(&self, client: &Self::Client, f: impl FnOnce(B) -> B + Send) -> Result<T> {
+    async fn patch(
+        &self,
+        client: &<Self::Endpoint as Endpoint>::Client,
+        f: impl FnOnce(<Self::Endpoint as Endpoint>::Patch) -> <Self::Endpoint as Endpoint>::Patch
+            + Send,
+    ) -> Result<<Self::Endpoint as Endpoint>::Result> {
         self.patch_request(f).request(client).await
     }
 }
 
-#[async_trait]
-pub trait Editable<T, B>: Patchable<T, B>
+impl<T> Patchable for T
 where
-    T: DeserializeOwned,
-    B: Default + Serialize,
+    T: Resource,
+    <T::Endpoint as Endpoint>::Patch: Default + Serialize,
 {
-    async fn edit(&mut self, client: &Self::Client, f: impl FnOnce(B) -> B + Send) -> Result<()>;
 }
 
 #[async_trait]
-impl<S, T, B> Editable<T, B> for S
+pub trait Editable
 where
-    S: Patchable<T, B> + Sync + Send,
-    T: DeserializeOwned + Into<Self>,
-    B: Default + Serialize,
+    Self: Patchable + Sized + Sync,
+    <Self::Endpoint as Endpoint>::Patch: Default + Serialize,
+    <Self::Endpoint as Endpoint>::Result: Into<Self>,
 {
-    async fn edit(&mut self, client: &Self::Client, f: impl FnOnce(B) -> B + Send) -> Result<()> {
+    async fn edit(
+        &mut self,
+        client: &<Self::Endpoint as Endpoint>::Client,
+        f: impl FnOnce(<Self::Endpoint as Endpoint>::Patch) -> <Self::Endpoint as Endpoint>::Patch
+            + Send,
+    ) -> Result<()> {
         *self = self.patch(client, f).await?.into();
         Ok(())
     }
 }
 
-#[async_trait]
-pub trait Deletable<T>: Resource<T> + Sized
+impl<T> Editable for T
 where
-    T: DeserializeOwned,
+    T: Patchable + Sync,
+    <T::Endpoint as Endpoint>::Patch: Default + Serialize,
+    <T::Endpoint as Endpoint>::Result: Into<T>,
 {
-    fn delete_request(self) -> Request<(), Self::Client> {
-        Request::delete(self.uri())
+}
+
+#[async_trait]
+pub trait Deletable
+where
+    Self: Resource + Sized,
+    Self::Endpoint: Endpoint<Delete = ()>,
+{
+    fn delete_request(self) -> Request<(), <Self::Endpoint as Endpoint>::Client> {
+        Request::delete(self.endpoint().uri())
     }
 
-    async fn delete(self, client: &Self::Client) -> Result<()> {
+    async fn delete(self, client: &<Self::Endpoint as Endpoint>::Client) -> Result<()> {
         self.delete_request().request(client).await
     }
+}
+
+impl<T> Deletable for T
+where
+    T: Resource,
+    T::Endpoint: Endpoint<Delete = ()>,
+{
 }

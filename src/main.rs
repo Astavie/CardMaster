@@ -61,7 +61,8 @@ async fn on_command(i: AnyInteraction, d: &mut InteractionDispatcher) -> Result<
 struct TestGame;
 
 #[async_trait]
-impl Logic<()> for TestGame {
+impl Logic for TestGame {
+    type Return = ();
     async fn logic(&mut self, _ui: &mut GameUI, _i: Interaction<MessageComponent>) -> Flow<()> {
         Flow::Return(())
     }

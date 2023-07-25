@@ -9,7 +9,8 @@ pub struct CAH {
 }
 
 #[async_trait]
-impl Logic<()> for CAH {
+impl Logic for CAH {
+    type Return = ();
     async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> Flow<()> {
         self.setup.logic(ui, i).await?;
         Flow::Return(())
@@ -25,8 +26,22 @@ impl Game for CAH {
         CAH {
             setup: Setup {
                 options: vec![
-                    ("Cards".to_owned(), SetupOption::Number(5, 20, 10)),
-                    ("Points".to_owned(), SetupOption::Number(1, i32::MAX, 8)),
+                    (
+                        "Packs".into(),
+                        SetupOption::MultiSelect(vec![
+                            ("CAH Base".into(), true),
+                            ("EPPgroep".into(), false),
+                        ]),
+                    ),
+                    (
+                        "Rules".into(),
+                        SetupOption::Flags(vec![
+                            ("Rando Cardrissian".into(), true),
+                            ("Double or nothing".into(), true),
+                        ]),
+                    ),
+                    ("Max points".into(), SetupOption::Number(1, i32::MAX, 8)),
+                    ("Hand cards".into(), SetupOption::Number(5, 20, 10)),
                 ],
             },
         }
