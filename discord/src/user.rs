@@ -78,7 +78,6 @@ impl Resource for PartialUser {
     }
 }
 
-#[derive(Clone, Copy)]
 pub struct Me;
 
 impl Endpoint for Me {

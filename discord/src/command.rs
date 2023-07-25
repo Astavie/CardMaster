@@ -4,11 +4,9 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::resource::Endpoint;
 
-use super::request::Discord;
 use super::{
     application::Application,
     guild::Guild,
-    request::{Request, Result},
     resource::{Resource, Snowflake},
 };
 
@@ -149,6 +147,12 @@ impl Commands {
             guild_id: guild,
         }
     }
+}
+
+impl Endpoint for Commands {
+    type Result = Command;
+    type Get = Vec<Command>;
+    type Create = CommandData;
 
     fn uri(&self) -> String {
         if let Some(guild) = self.guild_id {
@@ -159,20 +163,6 @@ impl Commands {
         } else {
             format!("/applications/{}/commands", self.application_id)
         }
-    }
-
-    pub fn create_request(&self, command: &CommandData) -> Request<Command> {
-        Request::post(self.uri(), command)
-    }
-    pub async fn create(&self, client: &Discord, command: &CommandData) -> Result<Command> {
-        self.create_request(command).request(client).await
-    }
-
-    pub fn all_request(&self) -> Request<Vec<Command>> {
-        Request::get(self.uri())
-    }
-    pub async fn all(&self, client: &Discord) -> Result<Vec<Command>> {
-        self.all_request().request(client).await
     }
 }
 

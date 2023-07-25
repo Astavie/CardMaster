@@ -73,8 +73,11 @@ impl<T> fmt::Display for Snowflake<T> {
 
 pub trait Endpoint {
     type Result: DeserializeOwned;
+    type Get: DeserializeOwned = Self::Result;
+
     type Delete = Infallible;
     type Patch = Infallible;
+    type Create = Infallible;
 
     type Client: Client + ?Sized = Discord;
     fn uri(&self) -> String;
@@ -99,14 +102,14 @@ pub trait Resource {
 
     fn get_request(
         &self,
-    ) -> Request<<Self::Endpoint as Endpoint>::Result, <Self::Endpoint as Endpoint>::Client> {
+    ) -> Request<<Self::Endpoint as Endpoint>::Get, <Self::Endpoint as Endpoint>::Client> {
         Request::get(self.endpoint().uri())
     }
 
     async fn get(
         &self,
         client: &<Self::Endpoint as Endpoint>::Client,
-    ) -> Result<<Self::Endpoint as Endpoint>::Result> {
+    ) -> Result<<Self::Endpoint as Endpoint>::Get> {
         self.get_request().request(client).await
     }
 }
@@ -187,5 +190,34 @@ impl<T> Deletable for T
 where
     T: Resource,
     T::Endpoint: Endpoint<Delete = ()>,
+{
+}
+
+#[async_trait]
+pub trait Creatable
+where
+    Self: Resource,
+    <Self::Endpoint as Endpoint>::Create: Serialize + Sync,
+{
+    fn create_request(
+        &self,
+        create: &<Self::Endpoint as Endpoint>::Create,
+    ) -> Request<<Self::Endpoint as Endpoint>::Result, <Self::Endpoint as Endpoint>::Client> {
+        Request::post(self.endpoint().uri(), create)
+    }
+
+    async fn create(
+        &self,
+        client: &<Self::Endpoint as Endpoint>::Client,
+        create: &<Self::Endpoint as Endpoint>::Create,
+    ) -> Result<<Self::Endpoint as Endpoint>::Result> {
+        self.create_request(create).request(client).await
+    }
+}
+
+impl<T> Creatable for T
+where
+    T: Resource,
+    <T::Endpoint as Endpoint>::Create: Serialize + Sync,
 {
 }

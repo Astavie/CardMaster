@@ -10,14 +10,14 @@ use dotenv_codegen::dotenv;
 use futures_util::StreamExt;
 use game::{Flow, Game, GameMessage, GameUI, InteractionDispatcher, Logic};
 
-use discord::application::{Application, ApplicationResource};
+use discord::application::{self, ApplicationResource};
 use discord::command::CommandData;
 use discord::command::Commands;
 use discord::gateway::Gateway;
 use discord::gateway::GatewayEvent;
 use discord::interaction::Interaction;
 use discord::request::Result;
-use discord::resource::Deletable;
+use discord::resource::{Creatable, Deletable, Resource};
 
 mod cah;
 mod game;
@@ -26,7 +26,7 @@ const RUSTMASTER: &str = dotenv!("RUSTMASTER");
 const CARDMASTER: &str = dotenv!("CARDMASTER");
 
 async fn purge(commands: Commands, client: &Discord) -> Result<()> {
-    for command in commands.all(client).await? {
+    for command in commands.get(client).await? {
         command.delete(client).await?;
     }
     Ok(())
@@ -87,7 +87,7 @@ async fn run() -> Result<()> {
     let client = Discord::new(RUSTMASTER);
 
     // create commands
-    let application = Application::get(&client).await?;
+    let application = application::Me.get(&client).await?;
     purge(application.global_commands(), &client).await?;
 
     application

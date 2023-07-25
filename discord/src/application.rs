@@ -2,14 +2,9 @@ use partial_id::Partial;
 use serde::Deserialize;
 
 use crate::guild::Guild;
-use crate::resource::Resource;
+use crate::resource::{Endpoint, Resource};
 
-use super::request::Discord;
-use super::{
-    command::Commands,
-    request::{Request, Result},
-    resource::Snowflake,
-};
+use super::{command::Commands, resource::Snowflake};
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
@@ -18,32 +13,32 @@ pub struct Application {
 }
 
 pub trait ApplicationResource {
-    fn endpoint(&self) -> Snowflake<Application>;
+    fn endpoint(&self) -> &Snowflake<Application>;
 
     fn global_commands(&self) -> Commands {
-        Commands::new(self.endpoint(), None)
+        Commands::new(self.endpoint().clone(), None)
     }
     fn guild_commands(&self, guild: &impl Resource<Endpoint = Snowflake<Guild>>) -> Commands {
-        Commands::new(self.endpoint(), Some(guild.endpoint().clone()))
-    }
-}
-
-impl Application {
-    pub fn get_request() -> Request<Self> {
-        Request::get("/oauth2/applications/@me".to_owned())
-    }
-    pub async fn get(client: &Discord) -> Result<Self> {
-        Self::get_request().request(client).await
+        Commands::new(self.endpoint().clone(), Some(guild.endpoint().clone()))
     }
 }
 
 impl ApplicationResource for Snowflake<Application> {
-    fn endpoint(&self) -> Snowflake<Application> {
-        self.clone()
+    fn endpoint(&self) -> &Snowflake<Application> {
+        self
     }
 }
 impl ApplicationResource for Application {
-    fn endpoint(&self) -> Snowflake<Application> {
-        self.id
+    fn endpoint(&self) -> &Snowflake<Application> {
+        &self.id
+    }
+}
+
+pub struct Me;
+
+impl Endpoint for Me {
+    type Result = Application;
+    fn uri(&self) -> String {
+        "/oauth2/applications/@me".into()
     }
 }
