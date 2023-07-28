@@ -1,4 +1,11 @@
-use std::{any::type_name, convert::Infallible, fmt, marker::PhantomData, num::ParseIntError};
+use std::{
+    any::type_name,
+    convert::Infallible,
+    fmt,
+    hash::{Hash, Hasher},
+    marker::PhantomData,
+    num::ParseIntError,
+};
 
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -22,8 +29,8 @@ impl<T> PartialEq for Snowflake<T> {
 
 impl<T> Eq for Snowflake<T> {}
 
-impl<T> std::hash::Hash for Snowflake<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl<T> Hash for Snowflake<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state)
     }
 }

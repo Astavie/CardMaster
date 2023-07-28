@@ -37,6 +37,7 @@ pub struct Interaction<T: 'static> {
 
     #[serde(flatten)]
     pub token: InteractionToken<T>,
+    pub user: User,
 
     pub channel_id: Snowflake<Channel>,
 }
@@ -342,15 +343,19 @@ impl<'de> Deserialize<'de> for AnyInteraction {
         D: Deserializer<'de>,
     {
         let mut value = Value::deserialize(d)?;
+
+        // make sure "user" exists
+        if !value.get("user").is_some() {
+            let user = value.get("member").unwrap().get("user").unwrap().clone();
+            value.as_object_mut().unwrap().insert("user".into(), user);
+        }
+
         let app_id = value.get("application_id").cloned();
         let message = value.get("message").cloned();
 
         let typ = value.get("type").and_then(Value::as_u64).unwrap();
 
-        let data = value
-            .get_mut("data")
-            .and_then(Value::as_object_mut)
-            .unwrap();
+        let data = value.get_mut("data").unwrap().as_object_mut().unwrap();
 
         Ok(match typ {
             2 => {

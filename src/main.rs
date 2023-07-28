@@ -6,6 +6,7 @@ use cah::CAH;
 use discord::command::{Param, StringOption};
 use discord::interaction::{AnyInteraction, InteractionResource, MessageComponent, Webhook};
 use discord::request::Discord;
+use discord::user::User;
 use dotenv_codegen::dotenv;
 use futures_util::StreamExt;
 use game::{Flow, Game, GameMessage, GameUI, InteractionDispatcher, Logic};
@@ -44,8 +45,8 @@ async fn on_command(i: AnyInteraction, d: &mut InteractionDispatcher) -> Result<
             "play" => {
                 let game = command.data.options[0].as_string().unwrap();
                 let task = match game {
-                    TestGame::NAME => TestGame::start(command.token),
-                    CAH::NAME => CAH::start(command.token),
+                    TestGame::NAME => TestGame::start(command.token, command.user),
+                    CAH::NAME => CAH::start(command.token, command.user),
                     _ => panic!("unknown game"),
                 }
                 .await?;
@@ -73,7 +74,7 @@ impl Game for TestGame {
     const NAME: &'static str = "Test";
     const COLOR: u32 = 0xFFFFFF;
 
-    fn new() -> Self {
+    fn new(user: User) -> Self {
         TestGame
     }
 
@@ -118,8 +119,8 @@ async fn run() -> Result<()> {
             )
             .required()
             .choices(vec![
-                Param::new(TestGame::NAME, TestGame::NAME.to_owned()),
-                Param::new(CAH::NAME, CAH::NAME.to_owned()),
+                Param::new(TestGame::NAME, TestGame::NAME),
+                Param::new(CAH::NAME, CAH::NAME),
             ])
             .into()]),
         )

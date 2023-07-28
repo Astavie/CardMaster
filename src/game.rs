@@ -181,11 +181,11 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
     const NAME: &'static str;
     const COLOR: u32;
 
-    fn new() -> Self;
+    fn new(user: User) -> Self;
     fn lobby_msg_reply(&self) -> GameMessage;
 
-    async fn start(token: InteractionToken<ApplicationCommand>) -> Result<GameTask> {
-        let me = Self::new();
+    async fn start(token: InteractionToken<ApplicationCommand>, user: User) -> Result<GameTask> {
+        let me = Self::new(user);
 
         // send lobby message
         let msg = me.lobby_msg_reply();
@@ -202,7 +202,7 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
                 msg: id,
                 msg_id: msg.id.snowflake(),
             },
-            game: Box::new(Self::new()),
+            game: Box::new(me),
         })
     }
 
@@ -219,7 +219,6 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
 
 pub struct Setup {
     pub options: Vec<(String, SetupOption)>,
-    // pub players: Option<Vec<Snowflake<User>>>,
 }
 
 const B64_TABLE: [char; 64] = [
@@ -314,11 +313,8 @@ impl Setup {
     }
 }
 
-#[async_trait]
-impl Logic for Setup {
-    type Return = ();
-
-    async fn logic(&mut self, ui: &mut GameUI, it: Interaction<MessageComponent>) -> Flow<()> {
+impl Setup {
+    pub fn update(&mut self, it: &Interaction<MessageComponent>) -> Flow<()> {
         // update state
         let mut chars = it.data.custom_id.chars();
         let ob = chars.next()?;
@@ -330,7 +326,7 @@ impl Logic for Setup {
                 for (_, option) in menu.iter_mut() {
                     *option = false;
                 }
-                for select in it.data.values {
+                for select in it.data.values.iter() {
                     let Some(b) = select.chars().next() else { continue };
                     let Some(i) = B64_TABLE.iter().position(|&c| c == b) else { continue };
                     let Some(option) = menu.get_mut(i).map(|(_, b)| b) else { continue };
@@ -354,7 +350,17 @@ impl Logic for Setup {
             },
         }
 
-        // rerender
+        Flow::Return(())
+    }
+}
+
+#[async_trait]
+impl Logic for Setup {
+    type Return = ();
+
+    async fn logic(&mut self, ui: &mut GameUI, it: Interaction<MessageComponent>) -> Flow<()> {
+        self.update(&it)?;
+
         let mut msg: GameMessage = it.data.message.into();
         msg.components = self.render();
 

@@ -107,13 +107,14 @@ pub struct Param<T> {
 }
 
 impl<T> Param<T> {
-    pub fn new<S>(name: S, value: T) -> Param<T>
+    pub fn new<S, I>(name: S, value: I) -> Param<T>
     where
         S: Into<String>,
+        I: Into<T>,
     {
         Param {
             name: name.into(),
-            value,
+            value: value.into(),
         }
     }
 }
