@@ -22,6 +22,7 @@ use discord::resource::{Creatable, Deletable, Resource};
 
 mod cah;
 mod game;
+mod setup;
 
 const RUSTMASTER: &str = dotenv!("RUSTMASTER");
 const CARDMASTER: &str = dotenv!("CARDMASTER");
@@ -74,7 +75,7 @@ impl Game for TestGame {
     const NAME: &'static str = "Test";
     const COLOR: u32 = 0xFFFFFF;
 
-    fn new(user: User) -> Self {
+    fn new(_user: User) -> Self {
         TestGame
     }
 

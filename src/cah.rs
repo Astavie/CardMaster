@@ -1,78 +1,68 @@
-use std::collections::HashMap;
+use std::unreachable;
 
 use async_trait::async_trait;
-use monostate::MustBeU64;
 
-use crate::game::{Flow, Game, GameMessage, GameUI, Logic, Setup, SetupOption};
+use crate::{
+    game::{Flow, Game, GameMessage, GameUI, Logic},
+    setup::{Setup, SetupOption},
+};
 
 use discord::{
     interaction::{Interaction, MessageComponent},
-    message::{ActionRow, ActionRowComponent, Button, ButtonStyle, Field},
-    resource::Snowflake,
+    message::{ActionRowComponent, Button, ButtonStyle, Field},
     user::User,
 };
 
-struct Player {}
-
 pub struct CAH {
     setup: Setup,
-    players: HashMap<Snowflake<User>, Player>,
 }
 
 #[async_trait]
 impl Logic for CAH {
     type Return = ();
     async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> Flow<()> {
-        self.setup.update(&i)?;
-        ui.update(i.token, self.render_setup()).await.unwrap();
-
-        Flow::Continue
+        if i.data.custom_id.as_str() == "Es" {
+            // Start!
+            // TODO: start
+            Flow::Return(())
+        } else {
+            // Setup
+            self.setup.update(&i)?;
+            ui.update(i.token, self.render_setup()).await.unwrap();
+            Flow::Continue
+        }
     }
 }
 
 impl CAH {
     fn render_setup(&self) -> GameMessage {
-        let mut setup = self.setup.render();
+        let mut rows = self.setup.render();
 
-        let components = vec![
-            ActionRowComponent::Button(Button::Action {
-                style: ButtonStyle::Success,
-                custom_id: "Ej".into(),
-                label: Some("Join".into()),
-                disabled: false,
-            }),
-            ActionRowComponent::Button(Button::Action {
-                style: ButtonStyle::Danger,
-                custom_id: "El".into(),
-                label: Some("Leave".into()),
-                disabled: false,
-            }),
-            ActionRowComponent::Button(Button::Action {
+        rows[4]
+            .components
+            .push(ActionRowComponent::Button(Button::Action {
                 style: ButtonStyle::Primary,
-                custom_id: "Ed".into(),
-                label: Some("Done".into()),
+                custom_id: "Es".into(),
+                label: Some("Start".into()),
                 disabled: false,
-            }),
-        ];
+            }));
 
-        setup.push(ActionRow {
-            typ: MustBeU64::<1>,
-            components,
-        });
+        let players_list = match self.setup.options[4].1 {
+            SetupOption::Players(ref list) => list,
+            _ => unreachable!(),
+        };
 
-        let mut players = self
-            .players
-            .keys()
-            .map(|id| format!("<@{}>", id))
+        let mut players_str = players_list
+            .iter()
+            .map(|&id| format!("<@{}>", id))
             .collect::<Vec<_>>()
             .join("\n");
-        if players.is_empty() {
-            players = "*None.*".into();
+
+        if players_str.is_empty() {
+            players_str = "*None.*".into();
         }
 
-        let players = Field::new("Players", players);
-
-        Self::message(vec![players], setup)
+        Self::message(vec![Field::new("Players", players_str)], rows)
     }
 }
 
@@ -82,10 +72,7 @@ impl Game for CAH {
     const COLOR: u32 = 0x000000;
 
     fn new(user: User) -> Self {
-        let mut players = HashMap::new();
-        players.insert(user.id, Player {});
         CAH {
-            players,
             setup: Setup {
                 options: vec![
                     (
@@ -104,6 +91,7 @@ impl Game for CAH {
                     ),
                     ("Max points".into(), SetupOption::Number(1, i32::MAX, 8)),
                     ("Hand cards".into(), SetupOption::Number(5, 20, 10)),
+                    ("Players".into(), SetupOption::Players(vec![user.id])),
                 ],
             },
         }

@@ -32,7 +32,7 @@ pub enum AnyInteraction {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Interaction<T: 'static> {
+pub struct Interaction<T: 'static + DropToken> {
     pub data: T,
 
     #[serde(flatten)]
@@ -43,18 +43,36 @@ pub struct Interaction<T: 'static> {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct InteractionToken<T: 'static> {
+pub struct InteractionToken<T: 'static + DropToken> {
     id: Snowflake<Interaction<T>>,
     token: String,
     application_id: Snowflake<Application>,
 }
 
-impl<T: 'static> Drop for InteractionToken<T> {
+impl<T: 'static + DropToken> Drop for InteractionToken<T> {
     fn drop(&mut self) {
-        let clone = Self {
-            id: self.id,
-            token: self.token.clone(),
-            application_id: self.application_id,
+        T::drop(self);
+    }
+}
+
+pub trait DropToken: Sized {
+    fn drop(t: &mut InteractionToken<Self>);
+}
+
+impl DropToken for ApplicationCommand {
+    fn drop(_t: &mut InteractionToken<Self>) {
+        // We let it fail
+        // TODO: should this be logged?
+    }
+}
+
+impl DropToken for MessageComponent {
+    fn drop(t: &mut InteractionToken<Self>) {
+        // We do nothing to the message
+        let clone = InteractionToken {
+            id: t.id,
+            token: t.token.clone(),
+            application_id: t.application_id,
         };
         tokio::spawn(async move {
             let _ = clone.deferred_update(&Webhook).await;
@@ -152,7 +170,7 @@ impl Client for Webhook {
     }
 }
 
-impl<T> InteractionToken<T> {
+impl<T: DropToken> InteractionToken<T> {
     fn uri_response(mut self) -> String {
         let id = self.id;
         let token = mem::replace(&mut self.token, String::new());
@@ -162,10 +180,17 @@ impl<T> InteractionToken<T> {
 }
 
 #[async_trait]
-pub trait InteractionResource<T: 'static>: Sized {
-    fn token(self) -> InteractionToken<T>;
+pub trait InteractionResource: Sized {
+    type Data: 'static + DropToken;
 
-    // TODO: put InteractionResponseIdentifier into Request
+    fn token(self) -> InteractionToken<Self::Data>;
+
+    fn forget(self) {
+        let mut token = self.token();
+        let _ = mem::replace(&mut token.token, String::new());
+        mem::forget(token); // do not run the destructor
+    }
+
     fn reply_request(
         self,
         f: impl FnOnce(CreateReply) -> CreateReply + Send,
@@ -200,8 +225,10 @@ pub trait InteractionResource<T: 'static>: Sized {
     ) -> Result<InteractionResponseIdentifier> {
         self.reply_request(f).request(client).await
     }
+}
 
-    // TODO: put these in a ComponentInteractionResource trait
+#[async_trait]
+pub trait ComponentInteractionResource: InteractionResource<Data = MessageComponent> {
     fn update_request(
         self,
         f: impl FnOnce(CreateReply) -> CreateReply,
@@ -325,17 +352,21 @@ impl Endpoint for InteractionResponseIdentifier {
     }
 }
 
-impl<T> InteractionResource<T> for InteractionToken<T> {
+impl<T: DropToken> InteractionResource for InteractionToken<T> {
+    type Data = T;
     fn token(self) -> InteractionToken<T> {
         self
     }
 }
 
-impl<T> InteractionResource<T> for Interaction<T> {
+impl<T: DropToken> InteractionResource for Interaction<T> {
+    type Data = T;
     fn token(self) -> InteractionToken<T> {
         self.token
     }
 }
+
+impl<T> ComponentInteractionResource for T where T: InteractionResource<Data = MessageComponent> {}
 
 impl<'de> Deserialize<'de> for AnyInteraction {
     fn deserialize<D>(d: D) -> ::std::result::Result<Self, D::Error>
@@ -371,33 +402,15 @@ impl<'de> Deserialize<'de> for AnyInteraction {
     }
 }
 
-#[derive(Debug)]
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type", content = "target_id")]
 pub enum CommandTarget {
+    #[serde(rename = 1)]
     ChatInput,
+    #[serde(rename = 2)]
     User(Snowflake<User>),
+    #[serde(rename = 3)]
     Message(Snowflake<Message>),
-}
-
-impl<'de> Deserialize<'de> for CommandTarget {
-    fn deserialize<D>(d: D) -> ::std::result::Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = Value::deserialize(d)?;
-
-        let typ = value.get("type").and_then(Value::as_u64).unwrap();
-
-        Ok(match typ {
-            1 => CommandTarget::ChatInput,
-            2 => CommandTarget::User(
-                Snowflake::deserialize(value.get("target_id").unwrap()).unwrap(),
-            ),
-            3 => CommandTarget::Message(
-                Snowflake::deserialize(value.get("target_id").unwrap()).unwrap(),
-            ),
-            _ => panic!("unsupported type {:?}", typ),
-        })
-    }
 }
 
 #[derive(Deserialize, Debug)]

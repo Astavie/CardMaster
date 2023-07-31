@@ -8,12 +8,12 @@ use isahc::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
 
-pub struct Request<
+pub struct Request<T, C = Discord, O = T, F = fn(T) -> O>
+where
     T: DeserializeOwned,
-    C: Client + ?Sized = Discord,
-    O = T,
-    F: FnOnce(T) -> O = fn(T) -> O,
-> {
+    C: Client + ?Sized,
+    F: FnOnce(T) -> O,
+{
     phantom: PhantomData<fn(&C) -> T>,
     pub method: Method,
     pub uri: String,
@@ -86,7 +86,12 @@ impl<T: DeserializeOwned, C: Client + ?Sized> Request<T, C> {
     }
 }
 
-impl<T: DeserializeOwned, F: FnOnce(T) -> O, O, C: Client + ?Sized> Request<T, C, O, F> {
+impl<T, F, O, C> Request<T, C, O, F>
+where
+    T: DeserializeOwned,
+    F: FnOnce(T) -> O,
+    C: Client + ?Sized,
+{
     pub fn map<F2, O2>(self, f: F2) -> Request<T, C, O2, impl FnOnce(T) -> O2>
     where
         F2: (FnOnce(O) -> O2),
