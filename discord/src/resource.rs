@@ -21,6 +21,12 @@ pub struct Snowflake<T> {
     id: u64,
 }
 
+impl<T> Snowflake<T> {
+    pub fn as_int(&self) -> u64 {
+        self.id
+    }
+}
+
 impl<T> PartialEq for Snowflake<T> {
     fn eq(&self, other: &Self) -> bool {
         self.id.eq(&other.id)
@@ -54,7 +60,7 @@ impl<T> Snowflake<T> {
 
 impl<T> From<Snowflake<T>> for String {
     fn from(value: Snowflake<T>) -> Self {
-        value.to_string()
+        value.id.to_string()
     }
 }
 
@@ -68,13 +74,7 @@ impl<T> TryFrom<String> for Snowflake<T> {
 
 impl<T> fmt::Debug for Snowflake<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("<{}> {}", type_name::<T>(), self))
-    }
-}
-
-impl<T> fmt::Display for Snowflake<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.id.fmt(f)
+        f.write_fmt(format_args!("<{}> {}", type_name::<T>(), self.id))
     }
 }
 
@@ -119,6 +119,25 @@ pub trait Resource {
     ) -> Result<<Self::Endpoint as Endpoint>::Get> {
         self.get_request().request(client).await
     }
+}
+
+#[async_trait]
+pub trait Updatable
+where
+    Self: Resource + Sized + Sync,
+    <Self::Endpoint as Endpoint>::Get: Into<Self>,
+{
+    async fn update(&mut self, client: &<Self::Endpoint as Endpoint>::Client) -> Result<()> {
+        *self = self.get(client).await?.into();
+        Ok(())
+    }
+}
+
+impl<T> Updatable for T
+where
+    T: Resource + Sync,
+    <T::Endpoint as Endpoint>::Get: Into<T>,
+{
 }
 
 #[async_trait]

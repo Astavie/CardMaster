@@ -127,7 +127,7 @@ impl Client for Webhook {
                 .header("Content-Type", "application/json")
                 .body(body.clone())
                 .unwrap();
-            println!("{}", request.body());
+            // println!("{}", request.body());
             isahc::send_async(request)
         } else {
             let request = http.body(()).unwrap();
@@ -148,7 +148,7 @@ impl Client for Webhook {
         }
 
         let string = response.text().await.unwrap();
-        println!("{}", string);
+        // println!("{}", string);
 
         if response.status().is_client_error() {
             return Err(RequestError::ClientError(response.status()));
@@ -175,7 +175,7 @@ impl<T: DropToken> InteractionToken<T> {
         let id = self.id;
         let token = mem::replace(&mut self.token, String::new());
         mem::forget(self); // do not run the destructor
-        format!("/interactions/{}/{}/callback", id, token)
+        format!("/interactions/{}/{}/callback", id.as_int(), token)
     }
 }
 
@@ -309,7 +309,7 @@ impl InteractionResponseIdentifier {
         let application_id = self.application_id;
         let token = self.token.clone();
         Request::post(
-            format!("/webhooks/{}/{}", self.application_id, self.token),
+            format!("/webhooks/{}/{}", self.application_id.as_int(), self.token),
             &reply,
         )
         .map(move |m: Message| {
@@ -342,12 +342,14 @@ impl Endpoint for InteractionResponseIdentifier {
         let id = self
             .message
             .as_ref()
-            .map(ToString::to_string)
+            .map(|id| id.as_int().to_string())
             .unwrap_or_else(|| "@original".to_owned());
 
         format!(
             "/webhooks/{}/{}/messages/{}",
-            self.application_id, self.token, id
+            self.application_id.as_int(),
+            self.token,
+            id
         )
     }
 }

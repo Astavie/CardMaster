@@ -212,7 +212,8 @@ pub trait MessageResource: Resource<Endpoint = MessageIdentifier> {
         Request::post(
             format!(
                 "/channels/{}/messages/{}/threads",
-                id.channel_id, id.message_id
+                id.channel_id.as_int(),
+                id.message_id.as_int()
             ),
             &CreateThread { name },
         )
@@ -230,7 +231,11 @@ impl Endpoint for MessageIdentifier {
     type Delete = ();
 
     fn uri(&self) -> String {
-        format!("/channels/{}/messages/{}", self.channel_id, self.message_id)
+        format!(
+            "/channels/{}/messages/{}",
+            self.channel_id.as_int(),
+            self.message_id.as_int()
+        )
     }
 }
 

@@ -174,3 +174,25 @@ pub enum SetupOption {
     Number(i32, i32, i32),
     Players(Vec<Snowflake<User>>),
 }
+
+impl SetupOption {
+    pub fn as_enabled(&self) -> &Vec<(String, bool)> {
+        match self {
+            SetupOption::MultiSelect(v) => v,
+            SetupOption::Flags(v) => v,
+            _ => panic!(),
+        }
+    }
+    pub fn as_number(&self) -> i32 {
+        match *self {
+            SetupOption::Number(_, _, val) => val,
+            _ => panic!(),
+        }
+    }
+    pub fn as_players(&self) -> &Vec<Snowflake<User>> {
+        match self {
+            SetupOption::Players(v) => v,
+            _ => panic!(),
+        }
+    }
+}

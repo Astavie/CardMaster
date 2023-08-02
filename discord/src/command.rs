@@ -159,10 +159,11 @@ impl Endpoint for Commands {
         if let Some(guild) = self.guild_id {
             format!(
                 "/applications/{}/guilds/{}/commands",
-                self.application_id, guild
+                self.application_id.as_int(),
+                guild.as_int()
             )
         } else {
-            format!("/applications/{}/commands", self.application_id)
+            format!("/applications/{}/commands", self.application_id.as_int())
         }
     }
 }
@@ -171,7 +172,7 @@ impl Endpoint for CommandIdentifier {
     type Result = Command;
     type Delete = ();
     fn uri(&self) -> String {
-        format!("{}/{}", self.command_pool.uri(), self.command_id)
+        format!("{}/{}", self.command_pool.uri(), self.command_id.as_int())
     }
 }
 

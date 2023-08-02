@@ -9,12 +9,13 @@ use super::resource::{Resource, Snowflake};
 #[derive(Debug, Deserialize)]
 pub struct Guild {
     pub id: Snowflake<Guild>,
+    pub name: String,
 }
 
 impl Endpoint for Snowflake<Guild> {
     type Result = Guild;
     fn uri(&self) -> String {
-        format!("/guilds/{}", self)
+        format!("/guilds/{}", self.as_int())
     }
 }
 

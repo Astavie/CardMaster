@@ -16,6 +16,9 @@ use discord::{
     user::User,
 };
 
+mod setup;
+pub use setup::{Setup, SetupOption};
+
 pub struct InteractionDispatcher {
     games: Vec<GameTask>,
 }
@@ -54,13 +57,29 @@ impl InteractionDispatcher {
 }
 
 pub struct GameUI {
-    pub msg: InteractionResponseIdentifier,
-    pub msg_id: Snowflake<Message>,
+    name: &'static str,
+    color: u32,
+
+    msg: InteractionResponseIdentifier,
+    msg_id: Snowflake<Message>,
 }
 
 pub struct GameMessage {
     pub embed: Embed,
     pub components: Vec<ActionRow>,
+}
+
+impl GameMessage {
+    fn sign(mut self, ui: &GameUI) -> Self {
+        self.embed = self.embed.author(Author::new(ui.name)).color(ui.color);
+        self
+    }
+    pub fn new(fields: Vec<Field>, components: Vec<ActionRow>) -> Self {
+        Self {
+            embed: Embed::default().fields(fields),
+            components,
+        }
+    }
 }
 
 impl From<Message> for GameMessage {
@@ -74,6 +93,7 @@ impl From<Message> for GameMessage {
 
 impl GameUI {
     pub async fn push(&mut self, message: GameMessage) -> Result<()> {
+        let message = message.sign(self);
         let (id, m) = self
             .msg
             .followup(&Webhook, |m| {
@@ -85,6 +105,7 @@ impl GameUI {
         Ok(())
     }
     pub async fn edit(&self, message: GameMessage) -> Result<()> {
+        let message = message.sign(self);
         self.msg
             .patch(&Webhook, |m| {
                 m.embeds(vec![message.embed]).components(message.components)
@@ -97,6 +118,7 @@ impl GameUI {
         i: InteractionToken<MessageComponent>,
         message: GameMessage,
     ) -> Result<()> {
+        // We do not sign the message here as this will be an ephemeral reply
         i.reply(&Webhook, |m| {
             m.embeds(vec![message.embed])
                 .components(message.components)
@@ -110,6 +132,7 @@ impl GameUI {
         i: InteractionToken<MessageComponent>,
         message: GameMessage,
     ) -> Result<()> {
+        let message = message.sign(self);
         i.update(&Webhook, |m| {
             m.embeds(vec![message.embed]).components(message.components)
         })
@@ -189,7 +212,9 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
         let me = Self::new(user);
 
         // send lobby message
-        let msg = me.lobby_msg_reply();
+        let mut msg = me.lobby_msg_reply();
+        msg.embed = msg.embed.author(Author::new(Self::NAME)).color(Self::COLOR);
+
         let id = token
             .reply(&Webhook, |m| {
                 m.embeds(vec![msg.embed]).components(msg.components)
@@ -200,20 +225,12 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
         // create task
         Ok(GameTask {
             ui: GameUI {
+                name: Self::NAME,
+                color: Self::COLOR,
                 msg: id,
                 msg_id: msg.id.snowflake(),
             },
             game: Box::new(me),
         })
-    }
-
-    fn message(fields: Vec<Field>, components: Vec<ActionRow>) -> GameMessage {
-        GameMessage {
-            embed: Embed::default()
-                .author(Author::new(Self::NAME))
-                .fields(fields)
-                .color(Self::COLOR),
-            components,
-        }
     }
 }

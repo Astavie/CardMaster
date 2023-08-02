@@ -1,3 +1,6 @@
+use std::fmt::{Display, Formatter};
+use std::write;
+
 use async_trait::async_trait;
 use partial_id::Partial;
 use serde::Deserialize;
@@ -17,10 +20,16 @@ pub struct Channel {
     pub id: Snowflake<Channel>,
 }
 
+impl Display for Snowflake<Channel> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> ::std::fmt::Result {
+        write!(f, "<#{}>", self.as_int())
+    }
+}
+
 impl Endpoint for Snowflake<Channel> {
     type Result = Channel;
     fn uri(&self) -> String {
-        format!("/channels/{}", self)
+        format!("/channels/{}", self.as_int())
     }
 }
 
@@ -33,7 +42,6 @@ pub trait ChannelResource: Resource<Endpoint = Snowflake<Channel>> {
         let msg = f(CreateMessage::default());
         Request::post(format!("{}/messages", self.endpoint().uri()), &msg)
     }
-
     async fn send_message(
         &self,
         client: &Discord,

@@ -1,8 +1,11 @@
+use std::fmt::{Display, Formatter};
+
 use async_trait::async_trait;
 use derive_setters::Setters;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 
+use crate::guild::PartialGuild;
 use crate::resource::Endpoint;
 
 use super::request::Discord;
@@ -20,6 +23,12 @@ pub struct User {
     pub username: String,
 }
 
+impl Display for Snowflake<User> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> ::std::fmt::Result {
+        f.write_fmt(format_args!("<@{}>", self.as_int()))
+    }
+}
+
 #[derive(Default, Setters, Serialize)]
 #[setters(strip_option)]
 pub struct PatchUser {
@@ -35,13 +44,12 @@ struct DMRequest {
 pub trait UserResource: Resource<Endpoint = Snowflake<User>> {
     fn create_dm_request(&self) -> Request<Channel> {
         Request::post(
-            "/users/@me/channels".to_owned(),
+            "/users/@me/channels".into(),
             &DMRequest {
                 recipient_id: self.endpoint().clone(),
             },
         )
     }
-
     async fn create_dm(&self, client: &Discord) -> Result<Channel> {
         self.create_dm_request().request(client).await
     }
@@ -61,7 +69,7 @@ impl<T> UserResource for T where T: Resource<Endpoint = Snowflake<User>> {}
 impl Endpoint for Snowflake<User> {
     type Result = User;
     fn uri(&self) -> String {
-        format!("/users/{}", self)
+        format!("/users/{}", self.as_int())
     }
 }
 
@@ -79,6 +87,15 @@ impl Resource for PartialUser {
 }
 
 pub struct Me;
+
+impl Me {
+    pub fn get_guilds_request(&self) -> Request<Vec<PartialGuild>> {
+        Request::get("/users/@me/guilds".into())
+    }
+    pub async fn get_guilds(&self, client: &Discord) -> Result<Vec<PartialGuild>> {
+        self.get_guilds_request().request(client).await
+    }
+}
 
 impl Endpoint for Me {
     type Result = User;

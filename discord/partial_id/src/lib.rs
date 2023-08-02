@@ -49,7 +49,36 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             }
         } else {
             quote! {
-                #ident: Some(src.#ident)
+                #ident: ::core::option::Option::Some(src.#ident)
+            }
+        }
+    });
+
+    let get_field = fields.iter().map(|(vis, ident, ty)| {
+        if ident.to_string() == "id" {
+            quote!{}
+        } else {
+            let get_ident = Ident::new(&format!("get_{}", ident), Span::call_site());
+            let get_ident_mut = Ident::new(&format!("get_{}_mut", ident), Span::call_site());
+            quote! {
+                #vis async fn #get_ident(&mut self, client: &crate::request::Discord) -> crate::request::Result<&#ty> {
+                    crate::request::Result::Ok(match self.#ident {
+                        ::core::option::Option::Some(ref v) => v,
+                        ::core::option::Option::None => {
+                            crate::resource::Updatable::update(self, client).await?;
+                            self.#ident.as_ref().unwrap()
+                        }
+                    })
+                }
+                #vis async fn #get_ident_mut(&mut self, client: &crate::request::Discord) -> crate::request::Result<&mut #ty> {
+                    crate::request::Result::Ok(match self.#ident {
+                        ::core::option::Option::Some(ref mut v) => v,
+                        ::core::option::Option::None => {
+                            crate::resource::Updatable::update(self, client).await?;
+                            self.#ident.as_mut().unwrap()
+                        }
+                    })
+                }
             }
         }
     });
@@ -64,7 +93,7 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             #(#field_var),*
         }
 
-        impl #impl_generics From<#ty #ty_generics> for #partial_ident #ty_generics
+        impl #impl_generics ::core::convert::From<#ty #ty_generics> for #partial_ident #ty_generics
             #where_clause
         {
             fn from(src: #ty #ty_generics) -> #partial_ident #ty_generics {
@@ -72,6 +101,12 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     #(#convert_branch),*
                 }
             }
+        }
+
+        impl #impl_generics #partial_ident #ty_generics
+            #where_clause
+        {
+            #(#get_field)*
         }
     };
     tokens.into()

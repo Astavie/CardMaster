@@ -1,12 +1,13 @@
+#![allow(incomplete_features)]
 #![feature(try_trait_v2)]
 #![feature(exhaustive_patterns)]
+#![feature(adt_const_params)]
 
 use async_trait::async_trait;
-use cah::CAH;
 use discord::command::{Param, StringOption};
 use discord::interaction::{AnyInteraction, InteractionResource, MessageComponent, Webhook};
 use discord::request::Discord;
-use discord::user::User;
+use discord::user::{self, User};
 use dotenv_codegen::dotenv;
 use futures_util::StreamExt;
 use game::{Flow, Game, GameMessage, GameUI, InteractionDispatcher, Logic};
@@ -20,9 +21,10 @@ use discord::interaction::Interaction;
 use discord::request::Result;
 use discord::resource::{Creatable, Deletable, Resource};
 
+use crate::cah::CAH;
+
 mod cah;
 mod game;
-mod setup;
 
 const RUSTMASTER: &str = dotenv!("RUSTMASTER");
 const CARDMASTER: &str = dotenv!("CARDMASTER");
@@ -80,13 +82,20 @@ impl Game for TestGame {
     }
 
     fn lobby_msg_reply(&self) -> GameMessage {
-        Self::message(Vec::new(), Vec::new())
+        GameMessage::new(Vec::new(), Vec::new())
     }
 }
 
 async fn run() -> Result<()> {
     // connect
     let client = Discord::new(RUSTMASTER);
+
+    // list guilds
+    let mut guilds = user::Me.get_guilds(&client).await?;
+    println!("GUILDS");
+    for guild in guilds.iter_mut() {
+        println!(" - {}", guild.get_name(&client).await?);
+    }
 
     // create commands
     let application = application::Me.get(&client).await?;

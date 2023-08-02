@@ -109,6 +109,8 @@ dependencies = [
  "futures-util",
  "ini",
  "monostate",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
