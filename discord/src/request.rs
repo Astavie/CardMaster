@@ -202,9 +202,9 @@ impl Discord {
     fn get_bucket(uri: &str) -> String {
         if uri.starts_with("/guilds/") || uri.starts_with("/channels/") {
             let s: String = uri.split_inclusive('/').take(3).collect();
-            s.strip_suffix("/").unwrap_or(&s).to_owned()
+            s.strip_suffix("/").unwrap_or(&s).into()
         } else {
-            uri.to_owned()
+            uri.into()
         }
     }
     fn bound_to_global_limit(uri: &str) -> bool {
@@ -268,12 +268,12 @@ impl Client for Discord {
         // send request
         let http = isahc::Request::builder()
             .method(method)
-            .uri("https://discord.com/api/v10".to_owned() + uri)
+            .uri(format!("https://discord.com/api/v10{}", uri))
             .header(
                 "User-Agent",
                 format!("DiscordBot ({}, {})", "https://astavie.github.io/", VERSION),
             )
-            .header("Authorization", "Bot ".to_owned() + &self.token);
+            .header("Authorization", format!("Bot {}", self.token));
 
         let mut response = if let Some(body) = body {
             let request = http
@@ -313,8 +313,8 @@ impl Client for Discord {
                     };
 
                     let mut me = self.limits.lock().await;
-                    me.bucket_cache.insert(bucket, bucket_id.to_owned());
-                    me.buckets.insert(bucket_id.to_owned(), limit);
+                    me.bucket_cache.insert(bucket, bucket_id.into());
+                    me.buckets.insert(bucket_id.into(), limit);
                 }
             }
         }

@@ -6,21 +6,18 @@ use discord::{
 };
 use monostate::MustBeU64;
 
-use crate::game::Flow;
+use crate::game::{Flow, B64_TABLE};
+
+use super::Menu;
 
 pub struct Setup {
     pub options: Vec<(String, SetupOption)>,
 }
 
-const B64_TABLE: [char; 64] = [
-    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
-    'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l',
-    'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4',
-    '5', '6', '7', '8', '9', '+', '/',
-];
+impl Menu for Setup {
+    type Update = ();
 
-impl Setup {
-    pub fn render(&self) -> Vec<ActionRow> {
+    fn render(&self) -> Vec<ActionRow> {
         assert!(self.options.len() <= 5);
         self.options
             .iter()
@@ -82,7 +79,7 @@ impl Setup {
                         ActionRowComponent::Button(Button::Action {
                             style: ButtonStyle::Primary,
                             custom_id: format!("{}d", B64_TABLE[oi]),
-                            label: Some("<".to_owned()),
+                            label: Some("<".into()),
                             disabled: val <= min,
                         }),
                         ActionRowComponent::Button(Button::Action {
@@ -94,7 +91,7 @@ impl Setup {
                         ActionRowComponent::Button(Button::Action {
                             style: ButtonStyle::Primary,
                             custom_id: format!("{}i", B64_TABLE[oi]),
-                            label: Some(">".to_owned()),
+                            label: Some(">".into()),
                             disabled: val >= max,
                         }),
                     ],
@@ -117,7 +114,7 @@ impl Setup {
             .collect()
     }
 
-    pub fn update(&mut self, it: &Interaction<MessageComponent>) -> Flow<()> {
+    fn update(&mut self, it: &Interaction<MessageComponent>) -> Flow<()> {
         // update state
         let mut chars = it.data.custom_id.chars();
         let ob = chars.next()?;

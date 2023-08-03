@@ -81,16 +81,17 @@ impl GatewayState {
                             GatewayOpcode::Dispatch => {
                                 // event happened
                                 self.sequence = message.s;
-                                let event: GatewayEvent = serde_json::from_str(&s).unwrap();
+                                let event: std::result::Result<GatewayEvent, _> = serde_json::from_str(&s);
                                 match event {
-                                    GatewayEvent::Ready(ready) => {
+                                    Ok(GatewayEvent::Ready(ready)) => {
                                         self.ready = Some(ready);
                                     }
-                                    event => {
+                                    Ok(event) => {
                                         if self.sender.send(event).await.is_err() {
                                             return Err(());
                                         }
                                     }
+                                    _ => (),
                                 }
                             }
                             GatewayOpcode::Heartbeat => {
@@ -214,7 +215,7 @@ const NAME: &str = env!("CARGO_PKG_NAME");
 
 impl Gateway {
     pub async fn connect(client: &Discord) -> request::Result<Self> {
-        let GatewayResponse { url } = Request::get("/gateway".to_owned()).request(client).await?;
+        let GatewayResponse { url } = Request::get("/gateway".into()).request(client).await?;
         let full_url = url + "/?v=10&encoding=json";
 
         let (mut ws_stream, _) = connect_async(full_url).await.expect("could not connect");
@@ -236,12 +237,12 @@ impl Gateway {
         let identify = serde_json::to_string(&GatewayMessage {
             op: GatewayOpcode::Identify,
             d: Identify {
-                token: client.token().to_owned(),
+                token: client.token().into(),
                 intents: 0,
                 properties: ConnectionProperties {
-                    os: "linux".to_owned(),
-                    browser: NAME.to_owned(),
-                    device: NAME.to_owned(),
+                    os: "linux".into(),
+                    browser: NAME.into(),
+                    device: NAME.into(),
                 },
             },
             s: None,

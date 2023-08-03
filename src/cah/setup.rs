@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::game::{self, Flow, GameMessage, GameUI, Logic, SetupOption};
+use crate::game::{self, Flow, GameMessage, GameUI, Logic, Menu, SetupOption};
 
 use discord::{
     interaction::{Interaction, MessageComponent},
@@ -8,22 +8,22 @@ use discord::{
     user::User,
 };
 
-use super::{Pack, PlayerKind};
+use super::{Packs, PlayerKind};
 
 pub struct Setup {
-    packs: Vec<Pack>,
+    packs: Packs,
     options: game::Setup,
 }
 
 pub struct Options {
-    pub packs: Vec<Pack>,
+    pub packs: Packs,
     pub cards: usize,
     pub points: i32,
 }
 
 #[async_trait]
 impl Logic for Setup {
-    type Return = (Options, Vec<PlayerKind>);
+    type Return = (Interaction<MessageComponent>, Options, Vec<PlayerKind>);
     async fn logic(
         &mut self,
         ui: &mut GameUI,
@@ -32,19 +32,22 @@ impl Logic for Setup {
         if i.data.custom_id.as_str() == "Es" {
             // Start!
             let packs_list = self.options.options[0].1.as_enabled();
-            let packs = self
-                .packs
-                .iter()
-                .zip(packs_list)
-                .filter(|(_, &(_, b))| b)
-                .map(|(p, _)| p)
-                .cloned()
-                .collect();
+            let packs = Packs(
+                self.packs
+                    .0
+                    .iter()
+                    .zip(packs_list)
+                    .filter(|(_, &(_, b))| b)
+                    .map(|(p, _)| p)
+                    .cloned()
+                    .collect(),
+            );
 
             let points = self.options.options[2].1.as_number();
             let cards = self.options.options[3].1.as_number() as usize;
 
             Flow::Return((
+                i,
                 Options {
                     packs,
                     points,
@@ -55,7 +58,7 @@ impl Logic for Setup {
         } else {
             // Setup
             self.options.update(&i)?;
-            ui.update(i.token, self.render()).await.unwrap();
+            ui.update(i, self.render()).await.unwrap();
             Flow::Continue
         }
     }
@@ -74,7 +77,7 @@ impl Setup {
 
         Iterator::chain(bots, users)
     }
-    pub fn new(user: User, packs: Vec<Pack>) -> Self {
+    pub fn new(user: User, packs: Packs) -> Self {
         Setup {
             options: game::Setup {
                 options: vec![
@@ -82,6 +85,7 @@ impl Setup {
                         "Packs".into(),
                         SetupOption::MultiSelect(
                             packs
+                                .0
                                 .iter()
                                 .enumerate()
                                 .map(|(i, pack)| (pack.0.clone(), i == 0))

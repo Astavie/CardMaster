@@ -14,7 +14,7 @@ use super::{
     user::PartialUser,
 };
 
-#[derive(Debug, Deserialize, Copy, Clone)]
+#[derive(Debug, Deserialize, Copy, Clone, PartialEq, Eq)]
 pub struct MessageIdentifier {
     channel_id: Snowflake<Channel>,
 
@@ -85,7 +85,7 @@ pub struct ActionRow {
     pub components: Vec<ActionRowComponent>,
 }
 
-#[derive(Debug, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Copy, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub enum ButtonStyle {
     Primary = 1,

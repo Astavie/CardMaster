@@ -15,6 +15,7 @@ discord = { path = "discord" }
 futures-util = "0.3.28"
 monostate = "0.1.6"
 ini = "1.3.0"
+rand = "0.8.5"
 
 [patch.crates-io]
 serde = { git = "https://github.com/Astavie/serde.git", branch = "integer-tags-for-enums-noprecompile" }

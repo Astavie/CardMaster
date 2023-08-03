@@ -94,6 +94,16 @@ pub struct CreateReply {
     flags: EnumSet<ReplyFlag>,
 }
 
+#[derive(Default, Setters, Serialize)]
+#[setters(strip_option)]
+pub struct CreateUpdate {
+    content: Option<String>,
+
+    // send these even if empty, so they can also be removed
+    embeds: Vec<Embed>,
+    components: Vec<ActionRow>,
+}
+
 #[derive(EnumSetType)]
 pub enum ReplyFlag {
     Ephemeral = 6,
@@ -120,7 +130,7 @@ impl Client for Webhook {
         // send request
         let http = isahc::Request::builder()
             .method(method)
-            .uri("https://discord.com/api/v10".to_owned() + uri);
+            .uri(format!("https://discord.com/api/v10{}", uri));
 
         let mut response = if let Some(body) = body {
             let request = http
@@ -231,7 +241,7 @@ pub trait InteractionResource: Sized {
 pub trait ComponentInteractionResource: InteractionResource<Data = MessageComponent> {
     fn update_request(
         self,
-        f: impl FnOnce(CreateReply) -> CreateReply,
+        f: impl FnOnce(CreateUpdate) -> CreateUpdate,
     ) -> Request<
         (),
         Webhook,
@@ -242,7 +252,7 @@ pub trait ComponentInteractionResource: InteractionResource<Data = MessageCompon
         let application_id = token.application_id;
         let str = token.token.clone();
 
-        let reply = f(CreateReply::default());
+        let reply = f(CreateUpdate::default());
         Request::post(
             token.uri_response(),
             &Response {
@@ -259,7 +269,7 @@ pub trait ComponentInteractionResource: InteractionResource<Data = MessageCompon
     async fn update(
         self,
         client: &Webhook,
-        f: impl FnOnce(CreateReply) -> CreateReply + Send,
+        f: impl FnOnce(CreateUpdate) -> CreateUpdate + Send,
     ) -> Result<InteractionResponseIdentifier> {
         self.update_request(f).request(client).await
     }
@@ -289,6 +299,7 @@ pub trait ComponentInteractionResource: InteractionResource<Data = MessageCompon
     }
 }
 
+#[derive(Clone, PartialEq, Eq)]
 pub struct InteractionResponseIdentifier {
     application_id: Snowflake<Application>,
     token: String,
@@ -343,7 +354,7 @@ impl Endpoint for InteractionResponseIdentifier {
             .message
             .as_ref()
             .map(|id| id.as_int().to_string())
-            .unwrap_or_else(|| "@original".to_owned());
+            .unwrap_or_else(|| "@original".into());
 
         format!(
             "/webhooks/{}/{}/messages/{}",
@@ -392,11 +403,11 @@ impl<'de> Deserialize<'de> for AnyInteraction {
 
         Ok(match typ {
             2 => {
-                data.insert("application_id".to_owned(), app_id.unwrap());
+                data.insert("application_id".into(), app_id.unwrap());
                 AnyInteraction::Command(Interaction::deserialize(value).unwrap())
             }
             3 => {
-                data.insert("message".to_owned(), message.unwrap().clone());
+                data.insert("message".into(), message.unwrap().clone());
                 AnyInteraction::Component(Interaction::deserialize(value).unwrap())
             }
             _ => panic!("unsupported type {:?}", typ),

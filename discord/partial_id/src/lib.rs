@@ -58,8 +58,8 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         if ident.to_string() == "id" {
             quote!{}
         } else {
-            let get_ident = Ident::new(&format!("get_{}", ident), Span::call_site());
-            let get_ident_mut = Ident::new(&format!("get_{}_mut", ident), Span::call_site());
+            let get_ident = Ident::new(&format!("get_{}", ident), ident.span());
+            let get_ident_mut = Ident::new(&format!("get_{}_mut", ident), ident.span());
             quote! {
                 #vis async fn #get_ident(&mut self, client: &crate::request::Discord) -> crate::request::Result<&#ty> {
                     crate::request::Result::Ok(match self.#ident {

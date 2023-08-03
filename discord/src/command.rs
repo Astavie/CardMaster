@@ -66,8 +66,28 @@ impl CommandData {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum CommandOption {
+    #[serde(rename = 1)]
+    SubCommand,
+    #[serde(rename = 2)]
+    SubCommandGroup,
     #[serde(rename = 3)]
     String(StringOption),
+    #[serde(rename = 4)]
+    Integer,
+    #[serde(rename = 5)]
+    Boolean,
+    #[serde(rename = 6)]
+    User,
+    #[serde(rename = 7)]
+    Channel,
+    #[serde(rename = 8)]
+    Role,
+    #[serde(rename = 9)]
+    Mentionable,
+    #[serde(rename = 10)]
+    Number,
+    #[serde(rename = 11)]
+    Attachment,
 }
 
 #[derive(Debug, Deserialize, Serialize, Setters)]

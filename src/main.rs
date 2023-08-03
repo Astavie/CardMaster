@@ -3,6 +3,8 @@
 #![feature(exhaustive_patterns)]
 #![feature(adt_const_params)]
 
+use std::println;
+
 use async_trait::async_trait;
 use discord::command::{Param, StringOption};
 use discord::interaction::{AnyInteraction, InteractionResource, MessageComponent, Webhook};
@@ -30,26 +32,42 @@ const RUSTMASTER: &str = dotenv!("RUSTMASTER");
 const CARDMASTER: &str = dotenv!("CARDMASTER");
 
 async fn purge(commands: Commands, client: &Discord) -> Result<()> {
-    for command in commands.get(client).await? {
-        command.delete(client).await?;
+    if let Ok(commands) = commands.get(client).await {
+        for command in commands {
+            command.delete(client).await?;
+        }
     }
     Ok(())
 }
 
-async fn on_command(i: AnyInteraction, d: &mut InteractionDispatcher) -> Result<()> {
+async fn on_command(
+    i: AnyInteraction,
+    d: &mut InteractionDispatcher,
+    client: &Discord,
+) -> Result<()> {
     match i {
         AnyInteraction::Command(command) => match command.data.name.as_str() {
             "ping" => {
                 command
                     .token
-                    .reply(&Webhook, |m| m.content("hurb".to_owned()))
+                    .reply(&Webhook, |m| m.content("hurb".into()))
                     .await?;
             }
             "play" => {
                 let game = command.data.options[0].as_string().unwrap();
                 let task = match game {
-                    TestGame::NAME => TestGame::start(command.token, command.user),
-                    CAH::NAME => CAH::start(command.token, command.user),
+                    TestGame::NAME => TestGame::start(command.token, command.user, None),
+                    CAH::NAME => CAH::start(command.token, command.user, None),
+                    _ => panic!("unknown game"),
+                }
+                .await?;
+                d.register(task);
+            }
+            "playthread" => {
+                let game = command.data.options[0].as_string().unwrap();
+                let task = match game {
+                    TestGame::NAME => TestGame::start(command.token, command.user, Some(client)),
+                    CAH::NAME => CAH::start(command.token, command.user, Some(client)),
                     _ => panic!("unknown game"),
                 }
                 .await?;
@@ -88,17 +106,18 @@ impl Game for TestGame {
 
 async fn run() -> Result<()> {
     // connect
-    let client = Discord::new(RUSTMASTER);
+    let client = Discord::new(CARDMASTER);
+    let application = application::Me.get(&client).await?;
 
     // list guilds
     let mut guilds = user::Me.get_guilds(&client).await?;
     println!("GUILDS");
     for guild in guilds.iter_mut() {
+        purge(application.guild_commands(guild), &client).await?;
         println!(" - {}", guild.get_name(&client).await?);
     }
 
     // create commands
-    let application = application::Me.get(&client).await?;
     purge(application.global_commands(), &client).await?;
 
     application
@@ -106,18 +125,18 @@ async fn run() -> Result<()> {
         .create(&client, &CommandData::new("ping", "Replies with pong!"))
         .await?;
 
-    application
-        .global_commands()
-        .create(
-            &client,
-            &CommandData::new("birthday", "Sets user birthday").options(vec![StringOption::new(
-                "birthday",
-                "Your birthday",
-            )
-            .required()
-            .into()]),
-        )
-        .await?;
+    // application
+    //     .global_commands()
+    //     .create(
+    //         &client,
+    //         &CommandData::new("birthday", "Sets user birthday").options(vec![StringOption::new(
+    //             "birthday",
+    //             "Your birthday",
+    //         )
+    //         .required()
+    //         .into()]),
+    //     )
+    //     .await?;
 
     application
         .global_commands()
@@ -136,6 +155,22 @@ async fn run() -> Result<()> {
         )
         .await?;
 
+    application
+        .global_commands()
+        .create(
+            &client,
+            &CommandData::new("playthread", "Start a new game within a thread").options(vec![
+                StringOption::new("game", "What game to play")
+                    .required()
+                    .choices(vec![
+                        Param::new(TestGame::NAME, TestGame::NAME),
+                        Param::new(CAH::NAME, CAH::NAME),
+                    ])
+                    .into(),
+            ]),
+        )
+        .await?;
+
     // create dispatch
     let mut dispatch = InteractionDispatcher::new();
 
@@ -143,7 +178,7 @@ async fn run() -> Result<()> {
     let mut gateway = Gateway::connect(&client).await?;
     while let Some(event) = gateway.next().await {
         match event {
-            GatewayEvent::InteractionCreate(i) => on_command(i, &mut dispatch).await?,
+            GatewayEvent::InteractionCreate(i) => on_command(i, &mut dispatch, &client).await?,
             _ => {}
         }
     }
