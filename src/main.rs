@@ -3,7 +3,7 @@
 #![feature(exhaustive_patterns)]
 #![feature(adt_const_params)]
 
-use std::println;
+use std::{env, println};
 
 use async_trait::async_trait;
 use discord::command::{Param, StringOption};
@@ -12,7 +12,7 @@ use discord::interaction::{
 };
 use discord::request::Discord;
 use discord::user::{self, MeResource, User};
-use dotenv_codegen::dotenv;
+use dotenv::dotenv;
 use futures_util::StreamExt;
 use game::{Flow, Game, GameMessage, GameUI, InteractionDispatcher, Logic};
 
@@ -28,9 +28,6 @@ use crate::cah::CAH;
 
 mod cah;
 mod game;
-
-const RUSTMASTER: &str = dotenv!("RUSTMASTER");
-const CARDMASTER: &str = dotenv!("CARDMASTER");
 
 async fn purge(commands: Commands, client: &Discord) -> Result<()> {
     if let Ok(commands) = commands.all(client).await {
@@ -106,8 +103,12 @@ impl Game for TestGame {
 }
 
 async fn run() -> Result<()> {
+    // load dotenv
+    dotenv().unwrap();
+    let token = env::var("CARDMASTER").expect("Bot token CARDMASTER must be set");
+
     // connect
-    let client = Discord::new(CARDMASTER);
+    let client = Discord::new(token);
     let application = application::Me.get(&client).await?;
 
     // list guilds
