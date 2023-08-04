@@ -185,8 +185,8 @@ struct ConnectionProperties {
 
 #[derive(Deserialize, Debug)]
 pub struct Ready {
-    resume_gateway_url: String,
-    session_id: String,
+    _resume_gateway_url: String,
+    _session_id: String,
 }
 
 #[derive(Serialize, Debug)]
