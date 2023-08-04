@@ -1,9 +1,11 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::resource::Endpoint;
+use crate::request::Discord;
+use crate::request::Request;
+use crate::resource::resource;
 
-use super::resource::{Resource, Snowflake};
+use super::resource::Snowflake;
 
 #[derive(Partial)]
 #[derive(Debug, Deserialize)]
@@ -12,22 +14,29 @@ pub struct Guild {
     pub name: String,
 }
 
-impl Endpoint for Snowflake<Guild> {
-    type Result = Guild;
-    fn uri(&self) -> String {
+impl Snowflake<Guild> {
+    pub fn uri(&self) -> String {
         format!("/guilds/{}", self.as_int())
     }
 }
 
-impl Resource for Guild {
-    type Endpoint = Snowflake<Guild>;
-    fn endpoint(&self) -> &Self::Endpoint {
+resource! {
+    GuildResource as Snowflake<Guild>;
+    use Discord;
+
+    fn get(&self) -> Guild {
+        Request::get(self.endpoint().uri())
+    }
+}
+
+impl GuildResource for Guild {
+    fn endpoint(&self) -> &Snowflake<Guild> {
         &self.id
     }
 }
-impl Resource for PartialGuild {
-    type Endpoint = Snowflake<Guild>;
-    fn endpoint(&self) -> &Self::Endpoint {
+
+impl GuildResource for PartialGuild {
+    fn endpoint(&self) -> &Snowflake<Guild> {
         &self.id
     }
 }

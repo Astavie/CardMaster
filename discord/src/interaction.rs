@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use crate::{
     request::{Client, RequestError},
-    resource::Endpoint,
+    resource::resource,
 };
 
 use super::{
@@ -203,7 +203,7 @@ pub trait InteractionResource: Sized {
 
     fn reply_request(
         self,
-        f: impl FnOnce(CreateReply) -> CreateReply + Send,
+        data: CreateReply,
     ) -> Request<
         (),
         Webhook,
@@ -214,26 +214,20 @@ pub trait InteractionResource: Sized {
         let application_id = token.application_id;
         let str = token.token.clone();
 
-        let reply = f(CreateReply::default());
-        Request::post(
-            token.uri_response(),
-            &Response {
-                typ: 4,
-                data: reply,
-            },
-        )
-        .map(move |_| InteractionResponseIdentifier {
-            application_id,
-            token: str,
-            message: None,
+        Request::post(token.uri_response(), &Response { typ: 4, data }).map(move |_| {
+            InteractionResponseIdentifier {
+                application_id,
+                token: str,
+                message: None,
+            }
         })
     }
     async fn reply(
         self,
         client: &Webhook,
-        f: impl FnOnce(CreateReply) -> CreateReply + Send,
+        data: CreateReply,
     ) -> Result<InteractionResponseIdentifier> {
-        self.reply_request(f).request(client).await
+        self.reply_request(data).request(client).await
     }
 }
 
@@ -241,7 +235,7 @@ pub trait InteractionResource: Sized {
 pub trait ComponentInteractionResource: InteractionResource<Data = MessageComponent> {
     fn update_request(
         self,
-        f: impl FnOnce(CreateUpdate) -> CreateUpdate,
+        data: CreateUpdate,
     ) -> Request<
         (),
         Webhook,
@@ -252,26 +246,20 @@ pub trait ComponentInteractionResource: InteractionResource<Data = MessageCompon
         let application_id = token.application_id;
         let str = token.token.clone();
 
-        let reply = f(CreateUpdate::default());
-        Request::post(
-            token.uri_response(),
-            &Response {
-                typ: 7,
-                data: reply,
-            },
-        )
-        .map(move |_| InteractionResponseIdentifier {
-            application_id,
-            token: str,
-            message: None,
+        Request::post(token.uri_response(), &Response { typ: 7, data }).map(move |_| {
+            InteractionResponseIdentifier {
+                application_id,
+                token: str,
+                message: None,
+            }
         })
     }
     async fn update(
         self,
         client: &Webhook,
-        f: impl FnOnce(CreateUpdate) -> CreateUpdate + Send,
+        data: CreateUpdate,
     ) -> Result<InteractionResponseIdentifier> {
-        self.update_request(f).request(client).await
+        self.update_request(data).request(client).await
     }
 
     fn deferred_update_request(
@@ -343,13 +331,23 @@ impl InteractionResponseIdentifier {
     }
 }
 
-impl Endpoint for InteractionResponseIdentifier {
-    type Result = Message;
-    type Patch = PatchMessage;
-    type Delete = ();
-    type Client = Webhook;
+resource! {
+    InteractionResponseResource as InteractionResponseIdentifier;
+    use Webhook;
 
-    fn uri(&self) -> String {
+    fn get(&self) -> Message {
+        Request::get(self.endpoint().uri())
+    }
+    fn patch(&self, data: PatchMessage) -> Message {
+        Request::patch(self.endpoint().uri(), &data)
+    }
+    fn delete(mut self) -> () {
+        Request::delete(self.endpoint().uri())
+    }
+}
+
+impl InteractionResponseIdentifier {
+    pub fn uri(&self) -> String {
         let id = self
             .message
             .as_ref()

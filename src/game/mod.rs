@@ -10,12 +10,15 @@ use futures_util::future::try_join_all;
 use discord::{
     channel::ChannelResource,
     interaction::{
-        ApplicationCommand, ComponentInteractionResource, Interaction, InteractionResource,
-        InteractionResponseIdentifier, InteractionToken, MessageComponent, ReplyFlag, Webhook,
+        ApplicationCommand, ComponentInteractionResource, CreateReply, CreateUpdate, Interaction,
+        InteractionResource, InteractionResponseIdentifier, InteractionResponseResource,
+        InteractionToken, MessageComponent, ReplyFlag, Webhook,
     },
-    message::{ActionRow, Author, Embed, Field, Message, MessageResource},
+    message::{
+        ActionRow, Author, CreateMessage, Embed, Field, Message, MessageResource, PatchMessage,
+    },
     request::{Discord, Result},
-    resource::{Deletable, Patchable, Resource, Snowflake},
+    resource::Snowflake,
     user::User,
 };
 
@@ -116,9 +119,12 @@ impl GameUI {
         self.msg
             .as_ref()
             .unwrap()
-            .patch(&Webhook, |m| {
-                m.embeds(vec![message.embed]).components(message.components)
-            })
+            .patch(
+                &Webhook,
+                PatchMessage::default()
+                    .embeds(vec![message.embed])
+                    .components(message.components),
+            )
             .await?;
         Ok(())
     }
@@ -132,11 +138,13 @@ impl GameUI {
         // we do not sign replies
 
         let response = i
-            .reply(&Webhook, |m| {
-                m.embeds(vec![message.embed])
+            .reply(
+                &Webhook,
+                CreateReply::default()
+                    .embeds(vec![message.embed])
                     .components(message.components)
-                    .flags(ReplyFlag::Ephemeral.into())
-            })
+                    .flags(ReplyFlag::Ephemeral.into()),
+            )
             .await?;
 
         let id = response.get(&Webhook).await?.id.snowflake();
@@ -154,15 +162,21 @@ impl GameUI {
             // sign if we are updating the base message
             message = message.sign(self);
             self.msg = Some(
-                i.update(&Webhook, |m| {
-                    m.embeds(vec![message.embed]).components(message.components)
-                })
+                i.update(
+                    &Webhook,
+                    CreateUpdate::default()
+                        .embeds(vec![message.embed])
+                        .components(message.components),
+                )
                 .await?,
             );
         } else {
-            i.update(&Webhook, |m| {
-                m.embeds(vec![message.embed]).components(message.components)
-            })
+            i.update(
+                &Webhook,
+                CreateUpdate::default()
+                    .embeds(vec![message.embed])
+                    .components(message.components),
+            )
             .await?;
         }
         Ok(())
@@ -270,9 +284,11 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
                 // TODO: close thread on end
                 // TODO: give thread better name
                 let id = token
-                    .reply(&Webhook, |m| {
-                        m.content(format!("A new game of ``{}`` is starting!", Self::NAME))
-                    })
+                    .reply(
+                        &Webhook,
+                        CreateReply::default()
+                            .content(format!("A new game of ``{}`` is starting!", Self::NAME)),
+                    )
                     .await?;
                 let channel = id
                     .get(&Webhook)
@@ -280,17 +296,23 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
                     .start_thread(discord, Self::NAME.into())
                     .await?;
                 let msg = channel
-                    .send_message(discord, |m| {
-                        m.embeds(vec![msg.embed]).components(msg.components)
-                    })
+                    .send_message(
+                        discord,
+                        CreateMessage::default()
+                            .embeds(vec![msg.embed])
+                            .components(msg.components),
+                    )
                     .await?;
                 (None, msg)
             }
             None => {
                 let id = token
-                    .reply(&Webhook, |m| {
-                        m.embeds(vec![msg.embed]).components(msg.components)
-                    })
+                    .reply(
+                        &Webhook,
+                        CreateReply::default()
+                            .embeds(vec![msg.embed])
+                            .components(msg.components),
+                    )
                     .await?;
                 let msg = id.get(&Webhook).await?;
                 (Some(id), msg)

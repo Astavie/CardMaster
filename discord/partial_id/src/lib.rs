@@ -54,35 +54,6 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         }
     });
 
-    let get_field = fields.iter().map(|(vis, ident, ty)| {
-        if ident.to_string() == "id" {
-            quote!{}
-        } else {
-            let get_ident = Ident::new(&format!("get_{}", ident), ident.span());
-            let get_ident_mut = Ident::new(&format!("get_{}_mut", ident), ident.span());
-            quote! {
-                #vis async fn #get_ident(&mut self, client: &crate::request::Discord) -> crate::request::Result<&#ty> {
-                    crate::request::Result::Ok(match self.#ident {
-                        ::core::option::Option::Some(ref v) => v,
-                        ::core::option::Option::None => {
-                            crate::resource::Updatable::update(self, client).await?;
-                            self.#ident.as_ref().unwrap()
-                        }
-                    })
-                }
-                #vis async fn #get_ident_mut(&mut self, client: &crate::request::Discord) -> crate::request::Result<&mut #ty> {
-                    crate::request::Result::Ok(match self.#ident {
-                        ::core::option::Option::Some(ref mut v) => v,
-                        ::core::option::Option::None => {
-                            crate::resource::Updatable::update(self, client).await?;
-                            self.#ident.as_mut().unwrap()
-                        }
-                    })
-                }
-            }
-        }
-    });
-
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let tokens = quote! {
@@ -101,12 +72,6 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                     #(#convert_branch),*
                 }
             }
-        }
-
-        impl #impl_generics #partial_ident #ty_generics
-            #where_clause
-        {
-            #(#get_field)*
         }
     };
     tokens.into()

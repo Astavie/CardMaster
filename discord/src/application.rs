@@ -1,8 +1,9 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::guild::Guild;
-use crate::resource::{Endpoint, Resource};
+use crate::guild::GuildResource;
+use crate::request::{Discord, Request};
+use crate::resource::resource;
 
 use super::{command::Commands, resource::Snowflake};
 
@@ -18,7 +19,7 @@ pub trait ApplicationResource {
     fn global_commands(&self) -> Commands {
         Commands::new(self.endpoint().clone(), None)
     }
-    fn guild_commands(&self, guild: &impl Resource<Endpoint = Snowflake<Guild>>) -> Commands {
+    fn guild_commands(&self, guild: &impl GuildResource) -> Commands {
         Commands::new(self.endpoint().clone(), Some(guild.endpoint().clone()))
     }
 }
@@ -36,9 +37,11 @@ impl ApplicationResource for Application {
 
 pub struct Me;
 
-impl Endpoint for Me {
-    type Result = Application;
-    fn uri(&self) -> String {
-        "/oauth2/applications/@me".into()
+resource! {
+    ApplicationMeResource as Me;
+    use Discord;
+
+    fn get(&self) -> Application {
+        Request::get("/oauth2/applications/@me")
     }
 }

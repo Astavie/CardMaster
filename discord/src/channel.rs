@@ -1,17 +1,16 @@
 use std::fmt::{Display, Formatter};
 use std::write;
 
-use async_trait::async_trait;
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::resource::Endpoint;
+use crate::request::Discord;
+use crate::resource::resource;
 
-use super::request::Discord;
 use super::{
     message::{CreateMessage, Message},
-    request::{Request, Result},
-    resource::{Resource, Snowflake},
+    request::Request,
+    resource::Snowflake,
 };
 
 #[derive(Partial)]
@@ -26,42 +25,32 @@ impl Display for Snowflake<Channel> {
     }
 }
 
-impl Endpoint for Snowflake<Channel> {
-    type Result = Channel;
+impl Snowflake<Channel> {
     fn uri(&self) -> String {
         format!("/channels/{}", self.as_int())
     }
 }
 
-#[async_trait]
-pub trait ChannelResource: Resource<Endpoint = Snowflake<Channel>> {
-    fn send_message_request(
-        &self,
-        f: impl FnOnce(CreateMessage) -> CreateMessage,
-    ) -> Request<Message> {
-        let msg = f(CreateMessage::default());
-        Request::post(format!("{}/messages", self.endpoint().uri()), &msg)
+resource! {
+    ChannelResource as Snowflake<Channel>;
+    use Discord;
+
+    fn get(&self) -> Channel {
+        Request::get(self.endpoint().uri())
     }
-    async fn send_message(
-        &self,
-        client: &Discord,
-        f: impl FnOnce(CreateMessage) -> CreateMessage + Send,
-    ) -> Result<Message> {
-        self.send_message_request(f).request(client).await
+    fn send_message(&self, data: CreateMessage) -> Message {
+        Request::post(format!("{}/messages", self.endpoint().uri()), &data)
     }
 }
 
-impl<T> ChannelResource for T where T: Resource<Endpoint = Snowflake<Channel>> {}
-
-impl Resource for Channel {
-    type Endpoint = Snowflake<Channel>;
-    fn endpoint(&self) -> &Self::Endpoint {
+impl ChannelResource for Channel {
+    fn endpoint(&self) -> &Snowflake<Channel> {
         &self.id
     }
 }
-impl Resource for PartialChannel {
-    type Endpoint = Snowflake<Channel>;
-    fn endpoint(&self) -> &Self::Endpoint {
+
+impl ChannelResource for PartialChannel {
+    fn endpoint(&self) -> &Snowflake<Channel> {
         &self.id
     }
 }

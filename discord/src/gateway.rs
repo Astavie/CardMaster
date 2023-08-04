@@ -215,7 +215,7 @@ const NAME: &str = env!("CARGO_PKG_NAME");
 
 impl Gateway {
     pub async fn connect(client: &Discord) -> request::Result<Self> {
-        let GatewayResponse { url } = Request::get("/gateway".into()).request(client).await?;
+        let GatewayResponse { url } = Request::get("/gateway").request(client).await?;
         let full_url = url + "/?v=10&encoding=json";
 
         let (mut ws_stream, _) = connect_async(full_url).await.expect("could not connect");

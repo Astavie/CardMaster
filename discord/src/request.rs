@@ -45,41 +45,53 @@ pub enum RequestError {
 pub type Result<T> = ::std::result::Result<T, RequestError>;
 
 impl<T: DeserializeOwned, C: Client + ?Sized> Request<T, C> {
-    pub fn get(uri: String) -> Self {
+    pub fn get<S>(uri: S) -> Self
+    where
+        S: Into<String>,
+    {
         Request {
             phantom: PhantomData,
             method: Method::GET,
-            uri,
+            uri: uri.into(),
             body: None,
             map: |t| t,
         }
     }
 
-    pub fn post(uri: String, body: &impl Serialize) -> Self {
+    pub fn post<S>(uri: S, body: &impl Serialize) -> Self
+    where
+        S: Into<String>,
+    {
         Request {
             phantom: PhantomData,
             method: Method::POST,
-            uri,
+            uri: uri.into(),
             body: Some(serde_json::to_string(body).unwrap()),
             map: |t| t,
         }
     }
 
-    pub fn patch(uri: String, body: &impl Serialize) -> Self {
+    pub fn patch<S>(uri: S, body: &impl Serialize) -> Self
+    where
+        S: Into<String>,
+    {
         Request {
             phantom: PhantomData,
             method: Method::PATCH,
-            uri,
+            uri: uri.into(),
             body: Some(serde_json::to_string(body).unwrap()),
             map: |t| t,
         }
     }
 
-    pub fn delete(uri: String) -> Self {
+    pub fn delete<S>(uri: S) -> Self
+    where
+        S: Into<String>,
+    {
         Request {
             phantom: PhantomData,
             method: Method::DELETE,
-            uri,
+            uri: uri.into(),
             body: None,
             map: |t| t,
         }

@@ -2,13 +2,11 @@ use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::resource::Endpoint;
+use crate::request::Discord;
+use crate::request::Request;
+use crate::resource::resource;
 
-use super::{
-    application::Application,
-    guild::Guild,
-    resource::{Resource, Snowflake},
-};
+use super::{application::Application, guild::Guild, resource::Snowflake};
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub struct Commands {
@@ -170,12 +168,8 @@ impl Commands {
     }
 }
 
-impl Endpoint for Commands {
-    type Result = Command;
-    type Get = Vec<Command>;
-    type Create = CommandData;
-
-    fn uri(&self) -> String {
+impl Commands {
+    pub fn uri(&self) -> String {
         if let Some(guild) = self.guild_id {
             format!(
                 "/applications/{}/guilds/{}/commands",
@@ -188,17 +182,38 @@ impl Endpoint for Commands {
     }
 }
 
-impl Endpoint for CommandIdentifier {
-    type Result = Command;
-    type Delete = ();
-    fn uri(&self) -> String {
+impl CommandIdentifier {
+    pub fn uri(&self) -> String {
         format!("{}/{}", self.command_pool.uri(), self.command_id.as_int())
     }
 }
 
-impl Resource for Command {
-    type Endpoint = CommandIdentifier;
-    fn endpoint(&self) -> &Self::Endpoint {
+resource! {
+    CommandsResource as Commands;
+    use Discord;
+
+    fn all(&self) -> Vec<Command> {
+        Request::get(self.endpoint().uri())
+    }
+    fn create(&self, data: CommandData) -> Command {
+        Request::post(self.endpoint().uri(), &data)
+    }
+}
+
+resource! {
+    CommandResource as CommandIdentifier;
+    use Discord;
+
+    fn get(&self) -> Command {
+        Request::get(self.endpoint().uri())
+    }
+    fn delete(mut self) -> () {
+        Request::delete(self.endpoint().uri())
+    }
+}
+
+impl CommandResource for Command {
+    fn endpoint(&self) -> &CommandIdentifier {
         &self.id
     }
 }
