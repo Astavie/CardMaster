@@ -348,8 +348,7 @@ impl Logic for CAH {
                         i,
                         GameMessage::new(vec![Field::new("Error", "not enough players")], vec![]),
                     )
-                    .await
-                    .unwrap();
+                    .await?;
                     return Flow::Continue;
                 }
 
@@ -357,11 +356,10 @@ impl Logic for CAH {
                     Some(p) => p.clone(),
                     None => {
                         ui.reply(
-                        i,
-                        GameMessage::new(vec![Field::new("Error", "I know you want to witness the AI uprising, but you can't play a game with only Rando Cardrissian")], vec![]),
-                    )
-                    .await
-                    .unwrap();
+                            i,
+                            GameMessage::new(vec![Field::new("Error", "I know you want to witness the AI uprising, but you can't play a game with only Rando Cardrissian")], vec![]),
+                        )
+                        .await?;
                         return Flow::Continue;
                     }
                 };
@@ -384,8 +382,7 @@ impl Logic for CAH {
                                 vec![],
                             ),
                         )
-                        .await
-                        .unwrap();
+                        .await?;
                         return Flow::Continue;
                     }
                 };
@@ -402,14 +399,13 @@ impl Logic for CAH {
                                 vec![],
                             ),
                         )
-                        .await
-                        .unwrap();
+                        .await?;
                         return Flow::Continue;
                     }
                 }
 
                 // start game!
-                ui.delete_replies().await.unwrap();
+                ui.delete_replies().await?;
 
                 if players
                     .iter()
@@ -429,7 +425,7 @@ impl Logic for CAH {
                             czar,
                         },
                     };
-                    ui.update(i, read.render()).await.unwrap();
+                    ui.update(i, read.render()).await?;
 
                     *self = CAH::Read(read);
                 } else {
@@ -441,7 +437,7 @@ impl Logic for CAH {
                             czar,
                         },
                     };
-                    ui.update(i, write.render()).await.unwrap();
+                    ui.update(i, write.render()).await?;
 
                     *self = CAH::Write(write);
                 }
@@ -456,8 +452,8 @@ impl Logic for CAH {
                     choice: ChoiceGrid { shuffle },
                     data: std::mem::replace(&mut d.data, DATA_DUMMY),
                 };
-                ui.delete_replies().await.unwrap();
-                ui.edit(read.render()).await.unwrap();
+                ui.delete_replies().await?;
+                ui.edit(ui.base_message_id(), read.render()).await?;
 
                 *self = CAH::Read(read);
                 Flow::Continue
@@ -495,7 +491,7 @@ impl Logic for CAH {
                     .next()
                     .unwrap();
 
-                ui.delete_replies().await.unwrap();
+                ui.delete_replies().await?;
 
                 if *czar != d.data.czar {
                     d.data.czar = czar.clone();
@@ -503,12 +499,12 @@ impl Logic for CAH {
                     let write = write::Write {
                         data: std::mem::replace(&mut d.data, DATA_DUMMY),
                     };
-                    ui.update(i, write.render()).await.unwrap();
+                    ui.update(i, write.render()).await?;
 
                     *self = CAH::Write(write);
                 } else {
                     d.choice.shuffle.shuffle(&mut rand::thread_rng());
-                    ui.update(i, d.render()).await.unwrap();
+                    ui.update(i, d.render()).await?;
                 }
 
                 Flow::Continue

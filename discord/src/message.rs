@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use derive_setters::Setters;
-use monostate::MustBe;
+use monostate::{MustBe, MustBeU64};
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -81,8 +81,17 @@ pub struct Embed {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ActionRow {
     #[serde(rename = "type")]
-    pub typ: MustBe!(1u64),
+    typ: MustBe!(1u64),
     pub components: Vec<ActionRowComponent>,
+}
+
+impl ActionRow {
+    pub fn new(components: Vec<ActionRowComponent>) -> Self {
+        Self {
+            typ: MustBeU64,
+            components,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize_repr, Deserialize_repr)]

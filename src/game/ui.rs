@@ -2,9 +2,40 @@ use discord::{
     interaction::{Interaction, MessageComponent},
     message::{ActionRow, ActionRowComponent, Button, ButtonStyle},
 };
-use monostate::MustBeU64;
 
-use super::{Flow, Menu, B64_TABLE};
+use super::{Flow, GameMessage, Menu, B64_TABLE};
+
+pub struct Event<'a> {
+    interaction: Option<&'a Interaction<MessageComponent>>,
+}
+
+impl<'a> Event<'a> {
+    pub fn none() -> Self {
+        Self { interaction: None }
+    }
+    pub fn component(interaction: &'a Interaction<MessageComponent>) -> Self {
+        Self {
+            interaction: Some(interaction),
+        }
+    }
+}
+
+pub trait Widget: Sized {
+    type Result: Send;
+    fn create(self, msg: &mut GameMessage, event: &Event) -> Flow<Option<Self::Result>>;
+
+    fn render(self, event: Event) -> Flow<(GameMessage, Option<Self::Result>)> {
+        let mut msg = GameMessage {
+            fields: Vec::new(),
+            components: Vec::new(),
+        };
+        match self.create(&mut msg, &event) {
+            Flow::Return(t) => Flow::Return((msg, t)),
+            Flow::Continue => Flow::Continue,
+            Flow::Exit => Flow::Exit,
+        }
+    }
+}
 
 pub struct SelectionGrid {
     pub count: usize,
@@ -39,19 +70,13 @@ impl Menu for SelectionGrid {
                     }
                     None => {
                         if !buttons.is_empty() {
-                            rows.push(ActionRow {
-                                typ: MustBeU64::<1>,
-                                components: buttons,
-                            });
+                            rows.push(ActionRow::new(buttons));
                         }
                         return rows;
                     }
                 }
             }
-            rows.push(ActionRow {
-                typ: MustBeU64::<1>,
-                components: buttons,
-            });
+            rows.push(ActionRow::new(buttons));
         }
     }
 
@@ -92,19 +117,13 @@ impl Menu for ChoiceGrid {
                     })),
                     None => {
                         if !buttons.is_empty() {
-                            rows.push(ActionRow {
-                                typ: MustBeU64::<1>,
-                                components: buttons,
-                            });
+                            rows.push(ActionRow::new(buttons));
                         }
                         return rows;
                     }
                 }
             }
-            rows.push(ActionRow {
-                typ: MustBeU64::<1>,
-                components: buttons,
-            });
+            rows.push(ActionRow::new(buttons));
         }
     }
 

@@ -5,7 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use futures_util::future::try_join_all;
+use futures_util::future::join_all;
 
 use discord::{
     channel::ChannelResource,
@@ -22,6 +22,8 @@ use discord::{
 // TODO: convert setup to a UI system
 mod setup;
 pub use setup::{Setup, SetupOption};
+
+use self::ui::{Event, Widget};
 
 pub mod ui;
 
@@ -80,107 +82,149 @@ pub struct GameUI {
     msg_id: Snowflake<Message>,
     msg: Option<InteractionResponseIdentifier>,
 
-    replies: HashMap<Snowflake<Message>, (Snowflake<User>, InteractionResponseIdentifier)>,
+    replies: HashMap<Snowflake<Message>, InteractionResponseIdentifier>,
 }
 
 pub struct GameMessage {
-    pub embed: Embed,
+    pub fields: Vec<Field>,
     pub components: Vec<ActionRow>,
 }
 
 impl GameMessage {
-    fn sign(mut self, ui: &GameUI) -> Self {
-        self.embed = self.embed.author(Author::new(ui.name)).color(ui.color);
-        self
-    }
     pub fn new(fields: Vec<Field>, components: Vec<ActionRow>) -> Self {
-        Self {
-            embed: Embed::default().fields(fields),
-            components,
-        }
+        Self { fields, components }
+    }
+    pub fn create<T>(&mut self, event: &Event, widget: impl Widget<Result = T>) -> Flow<Option<T>> {
+        widget.create(self, event)
     }
 }
 
 impl From<Message> for GameMessage {
     fn from(value: Message) -> Self {
         GameMessage {
-            embed: value.embeds.into_iter().next().unwrap(),
+            fields: value.embeds.into_iter().next().unwrap().fields,
             components: value.components,
         }
     }
 }
 
-impl GameUI {
-    pub async fn edit(&self, message: GameMessage) -> Result<()> {
-        let message = message.sign(self);
-        self.msg
-            .as_ref()
-            .unwrap()
-            .patch(&Webhook, |m| {
-                m.embeds(vec![message.embed]).components(message.components)
-            })
-            .await?;
-        Ok(())
+impl Widget for GameMessage {
+    type Result = ();
+
+    fn create(self, msg: &mut GameMessage, _event: &Event) -> Flow<Option<()>> {
+        msg.fields.extend(self.fields);
+        msg.components.extend(self.components);
+        Flow::Return(Some(()))
     }
-    pub async fn reply(
+}
+
+impl GameUI {
+    pub fn base_message_id(&self) -> Snowflake<Message> {
+        self.msg_id
+    }
+    pub async fn edit<T>(
+        &self,
+        id: Snowflake<Message>,
+        widget: impl Widget<Result = T>,
+    ) -> Flow<T> {
+        let (msg, res) = widget.render(Event::none())?;
+
+        if id == self.msg_id {
+            // sign if we are updating the base message
+            self.msg
+                .as_ref()
+                .unwrap()
+                .patch(&Webhook, |m| {
+                    m.embeds(vec![Embed::default()
+                        .author(Author::new(self.name))
+                        .color(self.color)
+                        .fields(msg.fields)])
+                        .components(msg.components)
+                })
+                .await
+                .unwrap();
+        } else {
+            self.replies[&id]
+                .patch(&Webhook, |m| {
+                    m.embeds(vec![Embed::default().fields(msg.fields)])
+                        .components(msg.components)
+                })
+                .await
+                .unwrap();
+        }
+
+        Flow::Return(res?)
+    }
+    pub async fn reply<T>(
         &mut self,
         i: Interaction<MessageComponent>,
-        message: GameMessage,
-    ) -> Result<()> {
-        let user = i.user.id;
+        widget: impl Widget<Result = T>,
+    ) -> Flow<T> {
+        let (msg, res) = widget.render(Event::component(&i))?;
 
         // we do not sign replies
 
         let response = i
             .reply(&Webhook, |m| {
-                m.embeds(vec![message.embed])
-                    .components(message.components)
+                m.embeds(vec![Embed::default().fields(msg.fields)])
+                    .components(msg.components)
                     .flags(ReplyFlag::Ephemeral.into())
             })
-            .await?;
+            .await
+            .unwrap();
 
-        let id = response.get(&Webhook).await?.id.snowflake();
+        let id = response.get(&Webhook).await.unwrap().id.snowflake();
+        self.replies.insert(id, response);
 
-        self.replies.insert(id, (user, response));
-
-        Ok(())
+        Flow::Return(res?)
     }
-    pub async fn update(
+    pub async fn update<T>(
         &mut self,
         i: Interaction<MessageComponent>,
-        mut message: GameMessage,
-    ) -> Result<()> {
+        widget: impl Widget<Result = T>,
+    ) -> Flow<T> {
+        let (msg, res) = widget.render(Event::component(&i))?;
+
         if i.data.message.id.snowflake() == self.msg_id {
             // sign if we are updating the base message
-            message = message.sign(self);
             self.msg = Some(
                 i.update(&Webhook, |m| {
-                    m.embeds(vec![message.embed]).components(message.components)
+                    m.embeds(vec![Embed::default()
+                        .author(Author::new(self.name))
+                        .color(self.color)
+                        .fields(msg.fields)])
+                        .components(msg.components)
                 })
-                .await?,
+                .await
+                .unwrap(),
             );
         } else {
             i.update(&Webhook, |m| {
-                m.embeds(vec![message.embed]).components(message.components)
+                m.embeds(vec![Embed::default().fields(msg.fields)])
+                    .components(msg.components)
             })
-            .await?;
+            .await
+            .unwrap();
         }
-        Ok(())
+
+        Flow::Return(res?)
     }
-    pub async fn delete(&mut self, i: Interaction<MessageComponent>) -> Result<()> {
+
+    pub async fn delete(&mut self, i: Interaction<MessageComponent>) -> Flow<()> {
         let msg = i.data.message.id.snowflake();
-        if let Some((_, id)) = self.replies.remove(&msg) {
-            id.delete(&Webhook).await?;
+        if let Some(id) = self.replies.remove(&msg) {
+            let _ = id.delete(&Webhook).await;
         }
         i.forget();
-        Ok(())
+        Flow::Return(())
     }
-    pub async fn delete_replies(&mut self) -> Result<()> {
-        try_join_all(self.replies.drain().map(|(_, (_, id))| id.delete(&Webhook))).await?;
-        Ok(())
+    pub async fn delete_replies(&mut self) -> Flow<()> {
+        let _ = join_all(self.replies.drain().map(|(_, id)| id.delete(&Webhook))).await;
+        Flow::Return(())
     }
 }
 
+#[must_use]
 pub enum Flow<T> {
     Return(T),
     Continue,
@@ -262,8 +306,7 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
         let me = Self::new(user);
 
         // send lobby message
-        let mut msg = me.lobby_msg_reply();
-        msg.embed = msg.embed.author(Author::new(Self::NAME)).color(Self::COLOR);
+        let msg = me.lobby_msg_reply();
 
         let (id, msg) = match thread {
             Some(discord) => {
@@ -281,7 +324,11 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
                     .await?;
                 let msg = channel
                     .send_message(discord, |m| {
-                        m.embeds(vec![msg.embed]).components(msg.components)
+                        m.embeds(vec![Embed::default()
+                            .author(Author::new(Self::NAME))
+                            .color(Self::COLOR)
+                            .fields(msg.fields)])
+                            .components(msg.components)
                     })
                     .await?;
                 (None, msg)
@@ -289,7 +336,11 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
             None => {
                 let id = token
                     .reply(&Webhook, |m| {
-                        m.embeds(vec![msg.embed]).components(msg.components)
+                        m.embeds(vec![Embed::default()
+                            .author(Author::new(Self::NAME))
+                            .color(Self::COLOR)
+                            .fields(msg.fields)])
+                            .components(msg.components)
                     })
                     .await?;
                 let msg = id.get(&Webhook).await?;

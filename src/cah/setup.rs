@@ -58,7 +58,7 @@ impl Logic for Setup {
         } else {
             // Setup
             self.options.update(&i)?;
-            ui.update(i, self.render()).await.unwrap();
+            ui.update(i, self.render()).await?;
             Flow::Continue
         }
     }

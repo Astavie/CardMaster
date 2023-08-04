@@ -6,7 +6,6 @@ use discord::{
     resource::Snowflake,
     user::User,
 };
-use monostate::MustBeU64;
 
 use crate::game::{Flow, GameMessage, GameUI, Logic, Menu};
 
@@ -87,15 +86,14 @@ impl Write {
                     ),
                 ),
             ],
-            vec![ActionRow {
-                typ: MustBeU64::<1>,
-                components: vec![ActionRowComponent::Button(Button::Action {
+            vec![ActionRow::new(vec![ActionRowComponent::Button(
+                Button::Action {
                     style: ButtonStyle::Primary,
                     custom_id: "hand".into(),
                     label: Some("Show Hand".into()),
                     disabled: false,
-                })],
-            }],
+                },
+            )])],
         )
     }
 }
@@ -118,7 +116,7 @@ impl Logic for Write {
                     return Flow::Continue;
                 }
             };
-            ui.reply(i, reply).await.unwrap();
+            ui.reply(i, reply).await?;
             return Flow::Continue;
         }
 
@@ -165,8 +163,8 @@ impl Logic for Write {
             Flow::Return(())
         } else {
             // rerender
-            ui.update(i, self.render_hand(user)?).await.unwrap();
-            ui.edit(self.render()).await.unwrap();
+            ui.update(i, self.render_hand(user)?).await?;
+            ui.edit(ui.base_message_id(), self.render()).await?;
             Flow::Continue
         }
     }

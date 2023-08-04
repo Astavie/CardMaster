@@ -3,7 +3,6 @@ use discord::{
     interaction::{Interaction, MessageComponent},
     message::{ActionRow, ActionRowComponent, Button, ButtonStyle, Field},
 };
-use monostate::MustBeU64;
 
 use crate::game::{ui::ChoiceGrid, Flow, GameMessage, GameUI, Logic, Menu};
 
@@ -94,8 +93,7 @@ impl Logic for Read {
                     vec![],
                 ),
             )
-            .await
-            .unwrap();
+            .await?;
             return Flow::Continue;
         }
 
@@ -138,8 +136,7 @@ impl Logic for Read {
                     vec![],
                 ),
             )
-            .await
-            .unwrap();
+            .await?;
             Flow::Exit
         } else {
             ui.update(
@@ -149,19 +146,17 @@ impl Logic for Read {
                         Field::new("Players", points),
                         Field::new("Round Winner", format!("{}\n\n>>> {}", name, answer)),
                     ],
-                    vec![ActionRow {
-                        typ: MustBeU64,
-                        components: vec![ActionRowComponent::Button(Button::Action {
+                    vec![ActionRow::new(vec![ActionRowComponent::Button(
+                        Button::Action {
                             style: ButtonStyle::Primary,
                             custom_id: "continue".into(),
                             label: Some("Continue".into()),
                             disabled: false,
-                        })],
-                    }],
+                        },
+                    )])],
                 ),
             )
-            .await
-            .unwrap();
+            .await?;
             Flow::Continue
         }
     }

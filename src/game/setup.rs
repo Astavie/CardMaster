@@ -4,7 +4,6 @@ use discord::{
     resource::Snowflake,
     user::User,
 };
-use monostate::MustBeU64;
 
 use crate::game::{Flow, B64_TABLE};
 
@@ -22,9 +21,8 @@ impl Menu for Setup {
         self.options
             .iter()
             .enumerate()
-            .map(|(oi, (name, option))| ActionRow {
-                typ: MustBeU64::<1>,
-                components: match *option {
+            .map(|(oi, (name, option))| {
+                ActionRow::new(match *option {
                     SetupOption::MultiSelect(ref menu) => {
                         assert!(menu.len() <= 64);
                         vec![ActionRowComponent::TextSelectMenu(TextSelectMenu {
@@ -109,7 +107,7 @@ impl Menu for Setup {
                             disabled: false,
                         }),
                     ],
-                },
+                })
             })
             .collect()
     }
