@@ -2,7 +2,6 @@
 #![feature(try_trait_v2)]
 #![feature(exhaustive_patterns)]
 #![feature(adt_const_params)]
-#![feature(trait_alias)]
 
 use std::{env, println};
 
