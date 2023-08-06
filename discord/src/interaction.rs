@@ -193,31 +193,29 @@ pub struct ResponseRequest(HttpRequest<(), Webhook>, InteractionResponseIdentifi
 pub struct MessageResponseRequest(HttpRequest<Message, Webhook>, InteractionResponseIdentifier);
 
 #[async_trait]
-impl Request for ResponseRequest {
+impl Request<Webhook> for ResponseRequest {
     type Output = InteractionResponseIdentifier;
-    type Client = Webhook;
 
-    async fn request_weak(self, client: &Self::Client) -> Result<Self::Output> {
+    async fn request_weak(self, client: &Webhook) -> Result<Self::Output> {
         self.0.request_weak(client).await?;
         Ok(self.1)
     }
-    async fn request(self, client: &Self::Client) -> Result<Self::Output> {
+    async fn request(self, client: &Webhook) -> Result<Self::Output> {
         self.0.request(client).await?;
         Ok(self.1)
     }
 }
 
 #[async_trait]
-impl Request for MessageResponseRequest {
+impl Request<Webhook> for MessageResponseRequest {
     type Output = (InteractionResponseIdentifier, Message);
-    type Client = Webhook;
 
-    async fn request_weak(mut self, client: &Self::Client) -> Result<Self::Output> {
+    async fn request_weak(mut self, client: &Webhook) -> Result<Self::Output> {
         let m = self.0.request_weak(client).await?;
         self.1.message = Some(m.id.snowflake());
         Ok((self.1, m))
     }
-    async fn request(mut self, client: &Self::Client) -> Result<Self::Output> {
+    async fn request(mut self, client: &Webhook) -> Result<Self::Output> {
         let m = self.0.request(client).await?;
         self.1.message = Some(m.id.snowflake());
         Ok((self.1, m))

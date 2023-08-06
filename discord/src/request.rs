@@ -9,12 +9,15 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
 
 #[async_trait]
-pub trait Request: Sized + Send {
+pub trait Request<C = Discord>
+where
+    Self: Sized + Send,
+    C: ?Sized + Sync,
+{
     type Output;
-    type Client: ?Sized + Sync;
 
-    async fn request_weak(self, client: &Self::Client) -> Result<Self::Output>;
-    async fn request(self, client: &Self::Client) -> Result<Self::Output>;
+    async fn request_weak(self, client: &C) -> Result<Self::Output>;
+    async fn request(self, client: &C) -> Result<Self::Output>;
 }
 
 pub struct HttpRequest<T, C = Discord>
@@ -29,13 +32,12 @@ where
 }
 
 #[async_trait]
-impl<T, C> Request for HttpRequest<T, C>
+impl<T, C> Request<C> for HttpRequest<T, C>
 where
     T: DeserializeOwned,
     C: Client + ?Sized,
 {
     type Output = T;
-    type Client = C;
 
     async fn request_weak(self, client: &C) -> Result<T> {
         client
