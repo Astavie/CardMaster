@@ -2,8 +2,8 @@ use partial_id::Partial;
 use serde::Deserialize;
 
 use crate::guild::GuildResource;
-use crate::request::{Discord, Request};
-use crate::resource::resource;
+use crate::request::{Discord, HttpRequest};
+use crate::resource::{resource, Endpoint};
 
 use super::{command::Commands, resource::Snowflake};
 
@@ -35,6 +35,13 @@ impl ApplicationResource for Application {
     }
 }
 
+impl Endpoint for Snowflake<Application> {
+    fn uri(&self) -> String {
+        // you can only ever get your own application data
+        "/applications/@me".into()
+    }
+}
+
 pub struct Me;
 
 resource! {
@@ -42,6 +49,6 @@ resource! {
     use Discord;
 
     fn get(&self) -> Application {
-        Request::get("/oauth2/applications/@me")
+        HttpRequest::get("/applications/@me")
     }
 }

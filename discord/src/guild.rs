@@ -2,8 +2,9 @@ use partial_id::Partial;
 use serde::Deserialize;
 
 use crate::request::Discord;
-use crate::request::Request;
+use crate::request::HttpRequest;
 use crate::resource::resource;
+use crate::resource::Endpoint;
 
 use super::resource::Snowflake;
 
@@ -14,8 +15,8 @@ pub struct Guild {
     pub name: String,
 }
 
-impl Snowflake<Guild> {
-    pub fn uri(&self) -> String {
+impl Endpoint for Snowflake<Guild> {
+    fn uri(&self) -> String {
         format!("/guilds/{}", self.as_int())
     }
 }
@@ -25,7 +26,7 @@ resource! {
     use Discord;
 
     fn get(&self) -> Guild {
-        Request::get(self.endpoint().uri())
+        HttpRequest::get(self.endpoint().uri())
     }
 }
 

@@ -4,9 +4,9 @@ use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::resource::resource;
+use crate::resource::{resource, Endpoint};
 
-use super::request::{Discord, Request};
+use super::request::{Discord, HttpRequest};
 use super::{channel::Channel, resource::Snowflake, user::PartialUser};
 
 #[derive(Debug, Deserialize, Copy, Clone, PartialEq, Eq)]
@@ -196,8 +196,8 @@ struct CreateThread {
     name: String,
 }
 
-impl MessageIdentifier {
-    pub fn uri(&self) -> String {
+impl Endpoint for MessageIdentifier {
+    fn uri(&self) -> String {
         format!(
             "/channels/{}/messages/{}",
             self.channel_id.as_int(),
@@ -211,17 +211,17 @@ resource! {
     use Discord;
 
     fn get(&self) -> Message {
-        Request::get(self.endpoint().uri())
+        HttpRequest::get(self.endpoint().uri())
     }
     fn patch(&self, data: PatchMessage) -> Message {
-        Request::patch(self.endpoint().uri(), &data)
+        HttpRequest::patch(self.endpoint().uri(), &data)
     }
     fn delete(mut self) -> () {
-        Request::delete(self.endpoint().uri())
+        HttpRequest::delete(self.endpoint().uri())
     }
 
     fn start_thread(&self, name: String) -> Channel {
-        Request::post(
+        HttpRequest::post(
             format!("{}/threads", self.endpoint().uri()),
             &CreateThread { name },
         )

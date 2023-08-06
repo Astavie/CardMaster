@@ -5,11 +5,11 @@ use partial_id::Partial;
 use serde::Deserialize;
 
 use crate::request::Discord;
-use crate::resource::resource;
+use crate::resource::{resource, Endpoint};
 
 use super::{
     message::{CreateMessage, Message},
-    request::Request,
+    request::HttpRequest,
     resource::Snowflake,
 };
 
@@ -25,7 +25,7 @@ impl Display for Snowflake<Channel> {
     }
 }
 
-impl Snowflake<Channel> {
+impl Endpoint for Snowflake<Channel> {
     fn uri(&self) -> String {
         format!("/channels/{}", self.as_int())
     }
@@ -36,10 +36,10 @@ resource! {
     use Discord;
 
     fn get(&self) -> Channel {
-        Request::get(self.endpoint().uri())
+        HttpRequest::get(self.endpoint().uri())
     }
     fn send_message(&self, data: CreateMessage) -> Message {
-        Request::post(format!("{}/messages", self.endpoint().uri()), &data)
+        HttpRequest::post(format!("{}/messages", self.endpoint().uri()), &data)
     }
 }
 

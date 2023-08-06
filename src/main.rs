@@ -116,7 +116,7 @@ async fn run() -> Result<()> {
     println!("GUILDS");
     for guild in guilds.iter_mut() {
         purge(application.guild_commands(guild), &client).await?;
-        println!(" - {}", guild.name.as_ref().cloned().unwrap());
+        println!(" - {}", guild.get_field(&client, |g| &g.name).await?);
     }
 
     // create commands

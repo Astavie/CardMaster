@@ -3,8 +3,9 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::request::Discord;
-use crate::request::Request;
+use crate::request::HttpRequest;
 use crate::resource::resource;
+use crate::resource::Endpoint;
 
 use super::{application::Application, guild::Guild, resource::Snowflake};
 
@@ -168,8 +169,8 @@ impl Commands {
     }
 }
 
-impl Commands {
-    pub fn uri(&self) -> String {
+impl Endpoint for Commands {
+    fn uri(&self) -> String {
         if let Some(guild) = self.guild_id {
             format!(
                 "/applications/{}/guilds/{}/commands",
@@ -182,8 +183,8 @@ impl Commands {
     }
 }
 
-impl CommandIdentifier {
-    pub fn uri(&self) -> String {
+impl Endpoint for CommandIdentifier {
+    fn uri(&self) -> String {
         format!("{}/{}", self.command_pool.uri(), self.command_id.as_int())
     }
 }
@@ -193,10 +194,10 @@ resource! {
     use Discord;
 
     fn all(&self) -> Vec<Command> {
-        Request::get(self.endpoint().uri())
+        HttpRequest::get(self.endpoint().uri())
     }
     fn create(&self, data: CommandData) -> Command {
-        Request::post(self.endpoint().uri(), &data)
+        HttpRequest::post(self.endpoint().uri(), &data)
     }
 }
 
@@ -205,10 +206,10 @@ resource! {
     use Discord;
 
     fn get(&self) -> Command {
-        Request::get(self.endpoint().uri())
+        HttpRequest::get(self.endpoint().uri())
     }
     fn delete(mut self) -> () {
-        Request::delete(self.endpoint().uri())
+        HttpRequest::delete(self.endpoint().uri())
     }
 }
 

@@ -24,12 +24,18 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
     } else {
         proc_macro2::TokenStream::from_iter(derives.into_iter())
     };
-    let partial_ident = Ident::new(&format!("Partial{}", ty), Span::call_site());
+    let partial_ty = Ident::new(&format!("Partial{}", ty), Span::call_site());
 
     let fields = filter_fields(match data {
         syn::Data::Struct(ref s) => &s.fields,
         _ => panic!("Field can only be derived for structs"),
     });
+
+    let id_typ = &fields
+        .iter()
+        .find(|(_, ident, _)| ident.to_string() == "id")
+        .unwrap()
+        .2;
 
     let field_var = fields.iter().map(|(vis, ident, ty)| {
         if ident.to_string() == "id" {
@@ -53,24 +59,74 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             }
         }
     });
+    let convert_none_branch = fields.iter().map(|(_vis, ident, _ty)| {
+        if ident.to_string() == "id" {
+            quote! {
+                #ident: src
+            }
+        } else {
+            quote! {
+                #ident: ::core::option::Option::None
+            }
+        }
+    });
 
     let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
 
     let tokens = quote! {
+
         #derive
-        #vis struct #partial_ident #ty_generics
-            #where_clause
-        {
+        #vis struct #partial_ty #generics {
             #(#field_var),*
         }
 
-        impl #impl_generics ::core::convert::From<#ty #ty_generics> for #partial_ident #ty_generics
+        impl #impl_generics ::core::convert::From<#ty #ty_generics> for #partial_ty #ty_generics
             #where_clause
         {
-            fn from(src: #ty #ty_generics) -> #partial_ident #ty_generics {
-                #partial_ident {
+            fn from(src: #ty #ty_generics) -> Self {
+                Self {
                     #(#convert_branch),*
                 }
+            }
+        }
+
+        impl #impl_generics ::core::convert::From<#id_typ> for #partial_ty #ty_generics
+            #where_clause
+        {
+            fn from(src: #id_typ) -> Self {
+                Self {
+                    #(#convert_none_branch),*
+                }
+            }
+        }
+
+        impl #impl_generics #ty #ty_generics
+            #where_clause
+        {
+            #vis async fn update(&mut self, client: &crate::request::Discord) -> crate::request::Result<()> {
+                *self = crate::request::Request::request(crate::request::HttpRequest::get(crate::resource::Endpoint::uri(&self.id)), client).await?;
+                crate::request::Result::Ok(())
+            }
+        }
+
+        impl #impl_generics #partial_ty #ty_generics
+            #where_clause
+        {
+            #vis async fn update(&mut self, client: &crate::request::Discord) -> crate::request::Result<()> {
+                let full: #ty = crate::request::Request::request(crate::request::HttpRequest::get(crate::resource::Endpoint::uri(&self.id)), client).await?;
+                *self = full.into();
+                crate::request::Result::Ok(())
+            }
+            #vis async fn get_field<T>(&mut self, client: &crate::request::Discord, f: fn(&Self) -> &::core::option::Option<T>) -> crate::request::Result<&T> {
+                crate::request::Result::Ok(match f(self) {
+                    ::core::option::Option::Some(_) => {
+                        f(self).as_ref().unwrap()
+                    }
+                    ::core::option::Option::None => {
+                        self.update(client).await?;
+                        f(self).as_ref().unwrap()
+                    }
+                })
             }
         }
     };

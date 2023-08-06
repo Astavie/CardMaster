@@ -9,9 +9,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 macro_rules! resource {
-    { $trait_name:ident $(<$($gen:ident)+>)? as $endpoint:ty $(where $($where:ident : $wheretyp:ty)+)?; use $client:ty; $(fn $func_name:ident ($ref:tt $self:ident $(, $name:ident : $ty:ty)*) -> $ret:ty $impl:block)+ } => {
+    { $trait_name:ident as $endpoint:ty; use $client:ty; $(fn $func_name:ident ($ref:tt $self:ident $(, $name:ident : $ty:ty)*) -> $ret:ty $impl:block)+ } => {
         #[::async_trait::async_trait]
-        pub trait $trait_name $(<$($gen)+>)? : Sized $(where $($where : $wheretyp)+)? {
+        pub trait $trait_name: Sized {
             fn endpoint(&self) -> &$endpoint;
             $(
                 async fn $func_name(#[allow(unused_mut)] $ref $self, client: &$client $(, $name : $ty)*) -> $crate::request::Result<$ret> {
@@ -20,7 +20,7 @@ macro_rules! resource {
                 }
             )+
         }
-        impl $(<$($gen)+>)? $trait_name $(<$($gen)+>)? for $endpoint $(where $($where : $wheretyp)+)? {
+        impl $trait_name for $endpoint {
             fn endpoint(&self) -> &$endpoint {
                 self
             }
@@ -28,6 +28,10 @@ macro_rules! resource {
     };
 }
 pub(crate) use resource;
+
+pub trait Endpoint {
+    fn uri(&self) -> String;
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(try_from = "String", into = "String")]
