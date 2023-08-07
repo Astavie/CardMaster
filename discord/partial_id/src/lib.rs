@@ -103,7 +103,7 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         impl #impl_generics #ty #ty_generics
             #where_clause
         {
-            #vis async fn update(&mut self, client: &crate::request::Discord) -> crate::request::Result<()> {
+            #vis async fn update(&mut self, client: &crate::request::Bot) -> crate::request::Result<()> {
                 *self = crate::request::Request::request(crate::request::HttpRequest::get(crate::resource::Endpoint::uri(&self.id)), client).await?;
                 crate::request::Result::Ok(())
             }
@@ -112,12 +112,12 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
         impl #impl_generics #partial_ty #ty_generics
             #where_clause
         {
-            #vis async fn update(&mut self, client: &crate::request::Discord) -> crate::request::Result<()> {
+            #vis async fn update(&mut self, client: &crate::request::Bot) -> crate::request::Result<()> {
                 let full: #ty = crate::request::Request::request(crate::request::HttpRequest::get(crate::resource::Endpoint::uri(&self.id)), client).await?;
                 *self = full.into();
                 crate::request::Result::Ok(())
             }
-            #vis async fn get_field<T>(&mut self, client: &crate::request::Discord, f: fn(&Self) -> &::core::option::Option<T>) -> crate::request::Result<&T> {
+            #vis async fn get_field<T>(&mut self, client: &crate::request::Bot, f: fn(&Self) -> &::core::option::Option<T>) -> crate::request::Result<&T> {
                 crate::request::Result::Ok(match f(self) {
                     ::core::option::Option::Some(_) => {
                         f(self).as_ref().unwrap()

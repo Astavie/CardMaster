@@ -9,7 +9,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
 
 #[async_trait]
-pub trait Request<C = Discord>
+pub trait Request<C = Bot>
 where
     Self: Sized + Send,
     C: ?Sized + Sync,
@@ -20,7 +20,7 @@ where
     async fn request(self, client: &C) -> Result<Self::Output>;
 }
 
-pub struct HttpRequest<T, C = Discord>
+pub struct HttpRequest<T, C = Bot>
 where
     T: DeserializeOwned,
     C: Client + ?Sized,
@@ -138,7 +138,7 @@ struct DiscordRateLimits {
 }
 
 #[derive(Clone)]
-pub struct Discord {
+pub struct Bot {
     token: String,
     limits: Arc<Mutex<DiscordRateLimits>>,
 }
@@ -191,7 +191,7 @@ pub trait Client: Sync {
     }
 }
 
-impl Discord {
+impl Bot {
     pub fn new<S: Into<String>>(token: S) -> Self {
         Self {
             token: token.into(),
@@ -227,14 +227,14 @@ impl Discord {
 }
 
 #[async_trait]
-impl Client for Discord {
+impl Client for Bot {
     async fn request_weak<T: DeserializeOwned>(
         &self,
         method: Method,
         uri: &str,
         body: Option<&str>,
     ) -> Result<T> {
-        let bucket = Discord::get_bucket(uri);
+        let bucket = Bot::get_bucket(uri);
 
         // rate limits
         let now = {
@@ -244,7 +244,7 @@ impl Client for Discord {
             let mut time = me.retry_after.duration_since(now);
 
             // global rate limit
-            let global = Discord::bound_to_global_limit(uri);
+            let global = Bot::bound_to_global_limit(uri);
             if global && me.request_rate >= GLOBAL_RATE_LIMIT {
                 time = time.max(Duration::from_secs_f32(1.0 / GLOBAL_RATE_LIMIT));
             }

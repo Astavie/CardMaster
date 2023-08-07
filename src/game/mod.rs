@@ -17,7 +17,7 @@ use discord::{
     message::{
         ActionRow, Author, CreateMessage, Embed, Field, Message, MessageResource, PatchMessage,
     },
-    request::{Discord, Result},
+    request::{Bot, Result},
     resource::Snowflake,
     user::User,
 };
@@ -271,7 +271,7 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
     async fn start(
         token: InteractionToken<ApplicationCommand>,
         user: User,
-        thread: Option<&Discord>,
+        thread: Option<&Bot>,
     ) -> Result<GameTask> {
         let me = Self::new(user);
 
