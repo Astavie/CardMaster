@@ -4,7 +4,6 @@ use std::write;
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::request::Discord;
 use crate::resource::{resource, Endpoint};
 
 use super::{
@@ -31,26 +30,33 @@ impl Endpoint for Snowflake<Channel> {
     }
 }
 
-resource! {
-    ChannelResource as Snowflake<Channel>;
-    use Discord;
+pub trait ChannelResource {
+    fn endpoint(&self) -> Snowflake<Channel>;
 
-    fn get(&self) -> Channel {
+    #[resource(Channel)]
+    fn get(&self) -> HttpRequest<Channel> {
         HttpRequest::get(self.endpoint().uri())
     }
-    fn send_message(&self, data: CreateMessage) -> Message {
+    #[resource(Message)]
+    fn send_message(&self, data: CreateMessage) -> HttpRequest<Message> {
         HttpRequest::post(format!("{}/messages", self.endpoint().uri()), &data)
     }
 }
 
+impl ChannelResource for Snowflake<Channel> {
+    fn endpoint(&self) -> Snowflake<Channel> {
+        self.clone()
+    }
+}
+
 impl ChannelResource for Channel {
-    fn endpoint(&self) -> &Snowflake<Channel> {
-        &self.id
+    fn endpoint(&self) -> Snowflake<Channel> {
+        self.id
     }
 }
 
 impl ChannelResource for PartialChannel {
-    fn endpoint(&self) -> &Snowflake<Channel> {
-        &self.id
+    fn endpoint(&self) -> Snowflake<Channel> {
+        self.id
     }
 }

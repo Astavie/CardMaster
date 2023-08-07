@@ -2,7 +2,6 @@ use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::request::Discord;
 use crate::request::HttpRequest;
 use crate::resource::resource;
 use crate::resource::Endpoint;
@@ -189,32 +188,38 @@ impl Endpoint for CommandIdentifier {
     }
 }
 
-resource! {
-    CommandsResource as Commands;
-    use Discord;
-
-    fn all(&self) -> Vec<Command> {
-        HttpRequest::get(self.endpoint().uri())
+impl Commands {
+    #[resource(Vec<Command>)]
+    pub fn all(&self) -> HttpRequest<Vec<Command>> {
+        HttpRequest::get(self.uri())
     }
-    fn create(&self, data: CommandData) -> Command {
-        HttpRequest::post(self.endpoint().uri(), &data)
+    #[resource(Command)]
+    pub fn create(&self, data: CommandData) -> HttpRequest<Command> {
+        HttpRequest::post(self.uri(), &data)
     }
 }
 
-resource! {
-    CommandResource as CommandIdentifier;
-    use Discord;
+pub trait CommandResource: Sized {
+    fn endpoint(&self) -> CommandIdentifier;
 
-    fn get(&self) -> Command {
+    #[resource(Command)]
+    fn get(&self) -> HttpRequest<Command> {
         HttpRequest::get(self.endpoint().uri())
     }
-    fn delete(mut self) -> () {
+    #[resource(())]
+    fn delete(self) -> HttpRequest<()> {
         HttpRequest::delete(self.endpoint().uri())
     }
 }
 
+impl CommandResource for CommandIdentifier {
+    fn endpoint(&self) -> CommandIdentifier {
+        self.clone()
+    }
+}
+
 impl CommandResource for Command {
-    fn endpoint(&self) -> &CommandIdentifier {
-        &self.id
+    fn endpoint(&self) -> CommandIdentifier {
+        self.id
     }
 }

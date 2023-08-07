@@ -2,7 +2,7 @@ use partial_id::Partial;
 use serde::Deserialize;
 
 use crate::guild::GuildResource;
-use crate::request::{Discord, HttpRequest};
+use crate::request::HttpRequest;
 use crate::resource::{resource, Endpoint};
 
 use super::{command::Commands, resource::Snowflake};
@@ -44,11 +44,9 @@ impl Endpoint for Snowflake<Application> {
 
 pub struct Me;
 
-resource! {
-    ApplicationMeResource as Me;
-    use Discord;
-
-    fn get(&self) -> Application {
+impl Me {
+    #[resource(Application)]
+    pub fn get(&self) -> HttpRequest<Application> {
         HttpRequest::get("/applications/@me")
     }
 }

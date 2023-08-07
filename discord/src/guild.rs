@@ -1,7 +1,6 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
-use crate::request::Discord;
 use crate::request::HttpRequest;
 use crate::resource::resource;
 use crate::resource::Endpoint;
@@ -21,23 +20,29 @@ impl Endpoint for Snowflake<Guild> {
     }
 }
 
-resource! {
-    GuildResource as Snowflake<Guild>;
-    use Discord;
+pub trait GuildResource {
+    fn endpoint(&self) -> Snowflake<Guild>;
 
-    fn get(&self) -> Guild {
+    #[resource(Guild)]
+    fn get(&self) -> HttpRequest<Guild> {
         HttpRequest::get(self.endpoint().uri())
     }
 }
 
+impl GuildResource for Snowflake<Guild> {
+    fn endpoint(&self) -> Snowflake<Guild> {
+        self.clone()
+    }
+}
+
 impl GuildResource for Guild {
-    fn endpoint(&self) -> &Snowflake<Guild> {
-        &self.id
+    fn endpoint(&self) -> Snowflake<Guild> {
+        self.id
     }
 }
 
 impl GuildResource for PartialGuild {
-    fn endpoint(&self) -> &Snowflake<Guild> {
-        &self.id
+    fn endpoint(&self) -> Snowflake<Guild> {
+        self.id
     }
 }

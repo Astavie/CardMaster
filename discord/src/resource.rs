@@ -8,26 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-macro_rules! resource {
-    { $trait_name:ident as $endpoint:ty; use $client:ty; $(fn $func_name:ident ($ref:tt $self:ident $(, $name:ident : $ty:ty)*) -> $ret:ty $impl:block)+ } => {
-        #[::async_trait::async_trait]
-        pub trait $trait_name: Sized {
-            fn endpoint(&self) -> &$endpoint;
-            $(
-                async fn $func_name(#[allow(unused_mut)] $ref $self, client: &$client $(, $name : $ty)*) -> $crate::request::Result<$ret> {
-                    let req = $impl;
-                    $crate::request::Request::request(req, client).await
-                }
-            )+
-        }
-        impl $trait_name for $endpoint {
-            fn endpoint(&self) -> &$endpoint {
-                self
-            }
-        }
-    };
-}
-pub(crate) use resource;
+pub use resource::resource;
 
 pub trait Endpoint {
     fn uri(&self) -> String;

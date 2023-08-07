@@ -6,7 +6,7 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use crate::resource::{resource, Endpoint};
 
-use super::request::{Discord, HttpRequest};
+use super::request::HttpRequest;
 use super::{channel::Channel, resource::Snowflake, user::PartialUser};
 
 #[derive(Debug, Deserialize, Copy, Clone, PartialEq, Eq)]
@@ -206,21 +206,24 @@ impl Endpoint for MessageIdentifier {
     }
 }
 
-resource! {
-    MessageResource as MessageIdentifier;
-    use Discord;
+pub trait MessageResource: Sized {
+    fn endpoint(&self) -> MessageIdentifier;
 
-    fn get(&self) -> Message {
+    #[resource(Message)]
+    fn get(&self) -> HttpRequest<Message> {
         HttpRequest::get(self.endpoint().uri())
     }
-    fn patch(&self, data: PatchMessage) -> Message {
+    #[resource(Message)]
+    fn patch(&self, data: PatchMessage) -> HttpRequest<Message> {
         HttpRequest::patch(self.endpoint().uri(), &data)
     }
-    fn delete(mut self) -> () {
+    #[resource(())]
+    fn delete(self) -> HttpRequest<()> {
         HttpRequest::delete(self.endpoint().uri())
     }
 
-    fn start_thread(&self, name: String) -> Channel {
+    #[resource(Channel)]
+    fn start_thread(&self, name: String) -> HttpRequest<Channel> {
         HttpRequest::post(
             format!("{}/threads", self.endpoint().uri()),
             &CreateThread { name },
@@ -228,13 +231,18 @@ resource! {
     }
 }
 
+impl MessageResource for MessageIdentifier {
+    fn endpoint(&self) -> MessageIdentifier {
+        self.clone()
+    }
+}
 impl MessageResource for Message {
-    fn endpoint(&self) -> &MessageIdentifier {
-        &self.id
+    fn endpoint(&self) -> MessageIdentifier {
+        self.id
     }
 }
 impl MessageResource for PartialMessage {
-    fn endpoint(&self) -> &MessageIdentifier {
-        &self.id
+    fn endpoint(&self) -> MessageIdentifier {
+        self.id
     }
 }

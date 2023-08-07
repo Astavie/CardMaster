@@ -11,8 +11,8 @@ use discord::{
     channel::ChannelResource,
     interaction::{
         ApplicationCommand, ComponentInteractionResource, CreateReply, CreateUpdate, Interaction,
-        InteractionResource, InteractionResponseIdentifier, InteractionResponseResource,
-        InteractionToken, MessageComponent, ReplyFlag, Webhook,
+        InteractionResource, InteractionResponseIdentifier, InteractionToken, MessageComponent,
+        ReplyFlag, Webhook,
     },
     message::{
         ActionRow, Author, CreateMessage, Embed, Field, Message, MessageResource, PatchMessage,

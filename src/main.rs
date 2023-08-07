@@ -11,14 +11,14 @@ use discord::interaction::{
     AnyInteraction, CreateReply, InteractionResource, MessageComponent, Webhook,
 };
 use discord::request::Discord;
-use discord::user::{self, MeResource, User};
+use discord::user::{self, User};
 use dotenv::dotenv;
 use futures_util::StreamExt;
 use game::{Flow, Game, GameMessage, GameUI, InteractionDispatcher, Logic};
 
-use discord::application::{self, ApplicationMeResource, ApplicationResource};
+use discord::application::{self, ApplicationResource};
 use discord::command::CommandData;
-use discord::command::{CommandResource, Commands, CommandsResource};
+use discord::command::{CommandResource, Commands};
 use discord::gateway::Gateway;
 use discord::gateway::GatewayEvent;
 use discord::interaction::Interaction;

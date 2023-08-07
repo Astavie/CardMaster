@@ -222,7 +222,6 @@ impl Request<Webhook> for MessageResponseRequest {
     }
 }
 
-#[async_trait]
 pub trait InteractionResource: Sized {
     type Data: 'static + DropToken;
 
@@ -234,7 +233,8 @@ pub trait InteractionResource: Sized {
         mem::forget(token); // do not run the destructor
     }
 
-    fn reply_request(self, data: CreateReply) -> ResponseRequest {
+    #[resource(InteractionResponseIdentifier, client = Webhook)]
+    fn reply(self, data: CreateReply) -> ResponseRequest {
         let token = self.token();
         let application_id = token.application_id;
         let str = token.token.clone();
@@ -248,18 +248,11 @@ pub trait InteractionResource: Sized {
             },
         )
     }
-    async fn reply(
-        self,
-        client: &Webhook,
-        data: CreateReply,
-    ) -> Result<InteractionResponseIdentifier> {
-        self.reply_request(data).request(client).await
-    }
 }
 
-#[async_trait]
 pub trait ComponentInteractionResource: InteractionResource<Data = MessageComponent> {
-    fn update_request(self, data: CreateUpdate) -> ResponseRequest {
+    #[resource(InteractionResponseIdentifier, client = Webhook)]
+    fn update(self, data: CreateUpdate) -> ResponseRequest {
         let token = self.token();
         let application_id = token.application_id;
         let str = token.token.clone();
@@ -273,15 +266,8 @@ pub trait ComponentInteractionResource: InteractionResource<Data = MessageCompon
             },
         )
     }
-    async fn update(
-        self,
-        client: &Webhook,
-        data: CreateUpdate,
-    ) -> Result<InteractionResponseIdentifier> {
-        self.update_request(data).request(client).await
-    }
-
-    fn deferred_update_request(self) -> ResponseRequest {
+    #[resource(InteractionResponseIdentifier, client = Webhook)]
+    fn deferred_update(self) -> ResponseRequest {
         let token = self.token();
         let application_id = token.application_id;
         let str = token.token.clone();
@@ -295,9 +281,6 @@ pub trait ComponentInteractionResource: InteractionResource<Data = MessageCompon
             },
         )
     }
-    async fn deferred_update(self, client: &Webhook) -> Result<InteractionResponseIdentifier> {
-        self.deferred_update_request().request(client).await
-    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -307,13 +290,24 @@ pub struct InteractionResponseIdentifier {
     message: Option<Snowflake<Message>>,
 }
 
-resource! {
-    InteractionResponseResource as InteractionResponseIdentifier;
-    use Webhook;
+impl InteractionResponseIdentifier {
+    #[resource(Message, client = Webhook)]
+    pub fn get(&self) -> HttpRequest<Message, Webhook> {
+        HttpRequest::get(self.uri())
+    }
+    #[resource(Message, client = Webhook)]
+    pub fn patch(&self, data: PatchMessage) -> HttpRequest<Message, Webhook> {
+        HttpRequest::patch(self.uri(), &data)
+    }
+    #[resource(Message, client = Webhook)]
+    pub fn delete(self) -> HttpRequest<Message, Webhook> {
+        HttpRequest::delete(self.uri())
+    }
 
-    fn followup(&self, data: CreateReply) -> (InteractionResponseIdentifier, Message) {
-        let application_id = self.endpoint().application_id;
-        let token = self.endpoint().token.clone();
+    #[resource((InteractionResponseIdentifier, Message), client = Webhook)]
+    pub fn followup(&self, data: CreateReply) -> MessageResponseRequest {
+        let application_id = self.application_id;
+        let token = self.token.clone();
 
         MessageResponseRequest(
             HttpRequest::post(
@@ -326,16 +320,6 @@ resource! {
                 message: None,
             },
         )
-    }
-
-    fn get(&self) -> Message {
-        HttpRequest::get(self.endpoint().uri())
-    }
-    fn patch(&self, data: PatchMessage) -> Message {
-        HttpRequest::patch(self.endpoint().uri(), &data)
-    }
-    fn delete(mut self) -> () {
-        HttpRequest::delete(self.endpoint().uri())
     }
 }
 
