@@ -2,6 +2,7 @@
 name = "discord"
 version = "0.1.0"
 edition = "2021"
+authors = [ "Astavie <astavie@pm.me>" ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,7 +12,6 @@ isahc = { version = "1.7.2", features = ["serde_json", "json"] }
 serde = { version = "1.0.126", features = ["derive"] }
 serde_json = "1.0.96"
 tokio = { version = "1.27.0", features = ["full"] }
-partial_id = { path = "partial_id" }
 serde_repr = "0.1.12"
 tokio-tungstenite = { version = "0.18.0", features = ["native-tls"] }
 futures-util = "0.3.28"
@@ -20,6 +20,9 @@ tokio-stream = "0.1.14"
 async-trait = "0.1.68"
 enumset = { version = "1.1.2", features = ["serde"] }
 monostate = "0.1.6"
+
+partial_id = { path = "partial_id" }
+resource = { path = "resource" }
 
 [patch.crates-io]
 serde = { git = "https://github.com/Astavie/serde.git", branch = "integer-tags-for-enums-noprecompile" }

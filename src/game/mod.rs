@@ -10,12 +10,15 @@ use futures_util::future::join_all;
 use discord::{
     channel::ChannelResource,
     interaction::{
-        ApplicationCommand, ComponentInteractionResource, Interaction, InteractionResource,
-        InteractionResponseIdentifier, InteractionToken, MessageComponent, ReplyFlag, Webhook,
+        ApplicationCommand, ComponentInteractionResource, CreateReply, CreateUpdate, Interaction,
+        InteractionResource, InteractionResponseIdentifier, InteractionToken, MessageComponent,
+        ReplyFlag, Webhook,
     },
-    message::{ActionRow, Author, Embed, Field, Message, MessageResource},
+    message::{
+        ActionRow, Author, CreateMessage, Embed, Field, Message, MessageResource, PatchMessage,
+    },
     request::{Discord, Result},
-    resource::{Deletable, Patchable, Resource, Snowflake},
+    resource::Snowflake,
     user::User,
 };
 
@@ -134,21 +137,25 @@ impl GameUI {
             self.msg
                 .as_ref()
                 .unwrap()
-                .patch(&Webhook, |m| {
-                    m.embeds(vec![Embed::default()
-                        .author(Author::new(self.name))
-                        .color(self.color)
-                        .fields(msg.fields)])
-                        .components(msg.components)
-                })
+                .patch(
+                    &Webhook,
+                    PatchMessage::default()
+                        .embeds(vec![Embed::default()
+                            .author(Author::new(self.name))
+                            .color(self.color)
+                            .fields(msg.fields)])
+                        .components(msg.components),
+                )
                 .await
                 .unwrap();
         } else {
             self.replies[&id]
-                .patch(&Webhook, |m| {
-                    m.embeds(vec![Embed::default().fields(msg.fields)])
-                        .components(msg.components)
-                })
+                .patch(
+                    &Webhook,
+                    PatchMessage::default()
+                        .embeds(vec![Embed::default().fields(msg.fields)])
+                        .components(msg.components),
+                )
                 .await
                 .unwrap();
         }
@@ -165,11 +172,13 @@ impl GameUI {
         // we do not sign replies
 
         let response = i
-            .reply(&Webhook, |m| {
-                m.embeds(vec![Embed::default().fields(msg.fields)])
+            .reply(
+                &Webhook,
+                CreateReply::default()
+                    .embeds(vec![Embed::default().fields(msg.fields)])
                     .components(msg.components)
-                    .flags(ReplyFlag::Ephemeral.into())
-            })
+                    .flags(ReplyFlag::Ephemeral.into()),
+            )
             .await
             .unwrap();
 
@@ -188,21 +197,25 @@ impl GameUI {
         if i.data.message.id.snowflake() == self.msg_id {
             // sign if we are updating the base message
             self.msg = Some(
-                i.update(&Webhook, |m| {
-                    m.embeds(vec![Embed::default()
-                        .author(Author::new(self.name))
-                        .color(self.color)
-                        .fields(msg.fields)])
-                        .components(msg.components)
-                })
+                i.update(
+                    &Webhook,
+                    CreateUpdate::default()
+                        .embeds(vec![Embed::default()
+                            .author(Author::new(self.name))
+                            .color(self.color)
+                            .fields(msg.fields)])
+                        .components(msg.components),
+                )
                 .await
                 .unwrap(),
             );
         } else {
-            i.update(&Webhook, |m| {
-                m.embeds(vec![Embed::default().fields(msg.fields)])
-                    .components(msg.components)
-            })
+            i.update(
+                &Webhook,
+                CreateUpdate::default()
+                    .embeds(vec![Embed::default().fields(msg.fields)])
+                    .components(msg.components),
+            )
             .await
             .unwrap();
         }
@@ -313,9 +326,11 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
                 // TODO: close thread on end
                 // TODO: give thread better name
                 let id = token
-                    .reply(&Webhook, |m| {
-                        m.content(format!("A new game of ``{}`` is starting!", Self::NAME))
-                    })
+                    .reply(
+                        &Webhook,
+                        CreateReply::default()
+                            .content(format!("A new game of ``{}`` is starting!", Self::NAME)),
+                    )
                     .await?;
                 let channel = id
                     .get(&Webhook)
@@ -323,25 +338,29 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
                     .start_thread(discord, Self::NAME.into())
                     .await?;
                 let msg = channel
-                    .send_message(discord, |m| {
-                        m.embeds(vec![Embed::default()
-                            .author(Author::new(Self::NAME))
-                            .color(Self::COLOR)
-                            .fields(msg.fields)])
-                            .components(msg.components)
-                    })
+                    .send_message(
+                        discord,
+                        CreateMessage::default()
+                            .embeds(vec![Embed::default()
+                                .author(Author::new(Self::NAME))
+                                .color(Self::COLOR)
+                                .fields(msg.fields)])
+                            .components(msg.components),
+                    )
                     .await?;
                 (None, msg)
             }
             None => {
                 let id = token
-                    .reply(&Webhook, |m| {
-                        m.embeds(vec![Embed::default()
-                            .author(Author::new(Self::NAME))
-                            .color(Self::COLOR)
-                            .fields(msg.fields)])
-                            .components(msg.components)
-                    })
+                    .reply(
+                        &Webhook,
+                        CreateReply::default()
+                            .embeds(vec![Embed::default()
+                                .author(Author::new(Self::NAME))
+                                .color(Self::COLOR)
+                                .fields(msg.fields)])
+                            .components(msg.components),
+                    )
                     .await?;
                 let msg = id.get(&Webhook).await?;
                 (Some(id), msg)

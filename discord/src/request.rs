@@ -8,17 +8,47 @@ use isahc::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
 
-pub struct Request<T, C = Discord, O = T, F = fn(T) -> O>
+#[async_trait]
+pub trait Request<C = Discord>
+where
+    Self: Sized + Send,
+    C: ?Sized + Sync,
+{
+    type Output;
+
+    async fn request_weak(self, client: &C) -> Result<Self::Output>;
+    async fn request(self, client: &C) -> Result<Self::Output>;
+}
+
+pub struct HttpRequest<T, C = Discord>
 where
     T: DeserializeOwned,
     C: Client + ?Sized,
-    F: FnOnce(T) -> O,
 {
     phantom: PhantomData<fn(&C) -> T>,
     pub method: Method,
     pub uri: String,
     pub body: Option<String>,
-    pub map: F,
+}
+
+#[async_trait]
+impl<T, C> Request<C> for HttpRequest<T, C>
+where
+    T: DeserializeOwned,
+    C: Client + ?Sized,
+{
+    type Output = T;
+
+    async fn request_weak(self, client: &C) -> Result<T> {
+        client
+            .request_weak(self.method, &self.uri, self.body.as_deref())
+            .await
+    }
+    async fn request(self, client: &C) -> Result<T> {
+        client
+            .request(self.method, &self.uri, self.body.as_deref())
+            .await
+    }
 }
 
 #[derive(Debug)]
@@ -44,81 +74,57 @@ pub enum RequestError {
 
 pub type Result<T> = ::std::result::Result<T, RequestError>;
 
-impl<T: DeserializeOwned, C: Client + ?Sized> Request<T, C> {
-    pub fn get(uri: String) -> Self {
-        Request {
-            phantom: PhantomData,
-            method: Method::GET,
-            uri,
-            body: None,
-            map: |t| t,
-        }
-    }
-
-    pub fn post(uri: String, body: &impl Serialize) -> Self {
-        Request {
-            phantom: PhantomData,
-            method: Method::POST,
-            uri,
-            body: Some(serde_json::to_string(body).unwrap()),
-            map: |t| t,
-        }
-    }
-
-    pub fn patch(uri: String, body: &impl Serialize) -> Self {
-        Request {
-            phantom: PhantomData,
-            method: Method::PATCH,
-            uri,
-            body: Some(serde_json::to_string(body).unwrap()),
-            map: |t| t,
-        }
-    }
-
-    pub fn delete(uri: String) -> Self {
-        Request {
-            phantom: PhantomData,
-            method: Method::DELETE,
-            uri,
-            body: None,
-            map: |t| t,
-        }
-    }
-}
-
-impl<T, F, O, C> Request<T, C, O, F>
+impl<T, C> HttpRequest<T, C>
 where
     T: DeserializeOwned,
-    F: FnOnce(T) -> O,
     C: Client + ?Sized,
 {
-    pub fn map<F2, O2>(self, f: F2) -> Request<T, C, O2, impl FnOnce(T) -> O2>
+    pub fn get<S>(uri: S) -> Self
     where
-        F2: (FnOnce(O) -> O2),
+        S: Into<String>,
     {
-        let f1 = self.map;
-        Request {
-            phantom: self.phantom,
-            method: self.method,
-            uri: self.uri,
-            body: self.body,
-            map: move |t| f(f1(t)),
+        HttpRequest {
+            phantom: PhantomData,
+            method: Method::GET,
+            uri: uri.into(),
+            body: None,
         }
     }
 
-    pub async fn request_weak(self, client: &C) -> Result<O> {
-        let t: T = client
-            .request_weak(self.method, &self.uri, self.body.as_deref())
-            .await?;
-        let f = self.map;
-        Ok(f(t))
+    pub fn post<S>(uri: S, body: &impl Serialize) -> Self
+    where
+        S: Into<String>,
+    {
+        HttpRequest {
+            phantom: PhantomData,
+            method: Method::POST,
+            uri: uri.into(),
+            body: Some(serde_json::to_string(body).unwrap()),
+        }
     }
-    pub async fn request(self, client: &C) -> Result<O> {
-        let t: T = client
-            .request(self.method, &self.uri, self.body.as_deref())
-            .await?;
-        let f = self.map;
-        Ok(f(t))
+
+    pub fn patch<S>(uri: S, body: &impl Serialize) -> Self
+    where
+        S: Into<String>,
+    {
+        HttpRequest {
+            phantom: PhantomData,
+            method: Method::PATCH,
+            uri: uri.into(),
+            body: Some(serde_json::to_string(body).unwrap()),
+        }
+    }
+
+    pub fn delete<S>(uri: S) -> Self
+    where
+        S: Into<String>,
+    {
+        HttpRequest {
+            phantom: PhantomData,
+            method: Method::DELETE,
+            uri: uri.into(),
+            body: None,
+        }
     }
 }
 

@@ -1,6 +1,3 @@
-#![feature(return_position_impl_trait_in_trait)]
-#![feature(associated_type_defaults)]
-
 pub mod gateway;
 pub mod request;
 pub mod resource;

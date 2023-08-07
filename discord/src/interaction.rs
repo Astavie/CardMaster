@@ -11,8 +11,8 @@ use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use crate::{
-    request::{Client, RequestError},
-    resource::Endpoint,
+    request::{Client, Request, RequestError},
+    resource::{resource, Endpoint},
 };
 
 use super::{
@@ -20,7 +20,7 @@ use super::{
     channel::Channel,
     command::CommandIdentifier,
     message::{ActionRow, Embed, Message, PatchMessage},
-    request::{Request, Result},
+    request::{HttpRequest, Result},
     resource::Snowflake,
     user::User,
 };
@@ -189,7 +189,39 @@ impl<T: DropToken> InteractionToken<T> {
     }
 }
 
+pub struct ResponseRequest(HttpRequest<(), Webhook>, InteractionResponseIdentifier);
+pub struct MessageResponseRequest(HttpRequest<Message, Webhook>, InteractionResponseIdentifier);
+
 #[async_trait]
+impl Request<Webhook> for ResponseRequest {
+    type Output = InteractionResponseIdentifier;
+
+    async fn request_weak(self, client: &Webhook) -> Result<Self::Output> {
+        self.0.request_weak(client).await?;
+        Ok(self.1)
+    }
+    async fn request(self, client: &Webhook) -> Result<Self::Output> {
+        self.0.request(client).await?;
+        Ok(self.1)
+    }
+}
+
+#[async_trait]
+impl Request<Webhook> for MessageResponseRequest {
+    type Output = (InteractionResponseIdentifier, Message);
+
+    async fn request_weak(mut self, client: &Webhook) -> Result<Self::Output> {
+        let m = self.0.request_weak(client).await?;
+        self.1.message = Some(m.id.snowflake());
+        Ok((self.1, m))
+    }
+    async fn request(mut self, client: &Webhook) -> Result<Self::Output> {
+        let m = self.0.request(client).await?;
+        self.1.message = Some(m.id.snowflake());
+        Ok((self.1, m))
+    }
+}
+
 pub trait InteractionResource: Sized {
     type Data: 'static + DropToken;
 
@@ -201,101 +233,53 @@ pub trait InteractionResource: Sized {
         mem::forget(token); // do not run the destructor
     }
 
-    fn reply_request(
-        self,
-        f: impl FnOnce(CreateReply) -> CreateReply + Send,
-    ) -> Request<
-        (),
-        Webhook,
-        InteractionResponseIdentifier,
-        impl FnOnce(()) -> InteractionResponseIdentifier + Send,
-    > {
+    #[resource(InteractionResponseIdentifier, client = Webhook)]
+    fn reply(self, data: CreateReply) -> ResponseRequest {
         let token = self.token();
         let application_id = token.application_id;
         let str = token.token.clone();
 
-        let reply = f(CreateReply::default());
-        Request::post(
-            token.uri_response(),
-            &Response {
-                typ: 4,
-                data: reply,
-            },
-        )
-        .map(move |_| InteractionResponseIdentifier {
-            application_id,
-            token: str,
-            message: None,
-        })
-    }
-    async fn reply(
-        self,
-        client: &Webhook,
-        f: impl FnOnce(CreateReply) -> CreateReply + Send,
-    ) -> Result<InteractionResponseIdentifier> {
-        self.reply_request(f).request(client).await
-    }
-}
-
-#[async_trait]
-pub trait ComponentInteractionResource: InteractionResource<Data = MessageComponent> {
-    fn update_request(
-        self,
-        f: impl FnOnce(CreateUpdate) -> CreateUpdate,
-    ) -> Request<
-        (),
-        Webhook,
-        InteractionResponseIdentifier,
-        impl FnOnce(()) -> InteractionResponseIdentifier + Send,
-    > {
-        let token = self.token();
-        let application_id = token.application_id;
-        let str = token.token.clone();
-
-        let reply = f(CreateUpdate::default());
-        Request::post(
-            token.uri_response(),
-            &Response {
-                typ: 7,
-                data: reply,
-            },
-        )
-        .map(move |_| InteractionResponseIdentifier {
-            application_id,
-            token: str,
-            message: None,
-        })
-    }
-    async fn update(
-        self,
-        client: &Webhook,
-        f: impl FnOnce(CreateUpdate) -> CreateUpdate + Send,
-    ) -> Result<InteractionResponseIdentifier> {
-        self.update_request(f).request(client).await
-    }
-
-    fn deferred_update_request(
-        self,
-    ) -> Request<
-        (),
-        Webhook,
-        InteractionResponseIdentifier,
-        impl FnOnce(()) -> InteractionResponseIdentifier + Send,
-    > {
-        let token = self.token();
-        let application_id = token.application_id;
-        let str = token.token.clone();
-
-        Request::post(token.uri_response(), &Response { typ: 7, data: () }).map(move |_| {
+        ResponseRequest(
+            HttpRequest::post(token.uri_response(), &Response { typ: 4, data }),
             InteractionResponseIdentifier {
                 application_id,
                 token: str,
                 message: None,
-            }
-        })
+            },
+        )
     }
-    async fn deferred_update(self, client: &Webhook) -> Result<InteractionResponseIdentifier> {
-        self.deferred_update_request().request(client).await
+}
+
+pub trait ComponentInteractionResource: InteractionResource<Data = MessageComponent> {
+    #[resource(InteractionResponseIdentifier, client = Webhook)]
+    fn update(self, data: CreateUpdate) -> ResponseRequest {
+        let token = self.token();
+        let application_id = token.application_id;
+        let str = token.token.clone();
+
+        ResponseRequest(
+            HttpRequest::post(token.uri_response(), &Response { typ: 7, data }),
+            InteractionResponseIdentifier {
+                application_id,
+                token: str,
+                message: None,
+            },
+        )
+    }
+    #[resource(InteractionResponseIdentifier, client = Webhook)]
+    fn deferred_update(self) -> ResponseRequest {
+        let token = self.token();
+        let application_id = token.application_id;
+        let str = token.token.clone();
+
+        ResponseRequest(
+            HttpRequest::post(token.uri_response(), &Response { typ: 7, data: () }),
+            InteractionResponseIdentifier {
+                application_id,
+                token: str,
+                message: None,
+            },
+        )
     }
 }
 
@@ -307,48 +291,39 @@ pub struct InteractionResponseIdentifier {
 }
 
 impl InteractionResponseIdentifier {
-    pub fn followup_request(
-        &self,
-        f: impl FnOnce(CreateReply) -> CreateReply,
-    ) -> Request<
-        Message,
-        Webhook,
-        (InteractionResponseIdentifier, Message),
-        impl FnOnce(Message) -> (InteractionResponseIdentifier, Message),
-    > {
-        let reply = f(CreateReply::default());
+    #[resource(Message, client = Webhook)]
+    pub fn get(&self) -> HttpRequest<Message, Webhook> {
+        HttpRequest::get(self.uri())
+    }
+    #[resource(Message, client = Webhook)]
+    pub fn patch(&self, data: PatchMessage) -> HttpRequest<Message, Webhook> {
+        HttpRequest::patch(self.uri(), &data)
+    }
+    #[resource(Message, client = Webhook)]
+    pub fn delete(self) -> HttpRequest<Message, Webhook> {
+        HttpRequest::delete(self.uri())
+    }
+
+    #[resource((InteractionResponseIdentifier, Message), client = Webhook)]
+    pub fn followup(&self, data: CreateReply) -> MessageResponseRequest {
         let application_id = self.application_id;
         let token = self.token.clone();
-        Request::post(
-            format!("/webhooks/{}/{}", self.application_id.as_int(), self.token),
-            &reply,
+
+        MessageResponseRequest(
+            HttpRequest::post(
+                format!("/webhooks/{}/{}", application_id.as_int(), token),
+                &data,
+            ),
+            InteractionResponseIdentifier {
+                application_id,
+                token,
+                message: None,
+            },
         )
-        .map(move |m: Message| {
-            (
-                InteractionResponseIdentifier {
-                    application_id,
-                    token,
-                    message: Some(m.id.snowflake()),
-                },
-                m,
-            )
-        })
-    }
-    pub async fn followup(
-        &self,
-        client: &Webhook,
-        f: impl FnOnce(CreateReply) -> CreateReply + Send,
-    ) -> Result<(InteractionResponseIdentifier, Message)> {
-        self.followup_request(f).request(client).await
     }
 }
 
 impl Endpoint for InteractionResponseIdentifier {
-    type Result = Message;
-    type Patch = PatchMessage;
-    type Delete = ();
-    type Client = Webhook;
-
     fn uri(&self) -> String {
         let id = self
             .message

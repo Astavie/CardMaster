@@ -7,7 +7,9 @@ use std::{env, println};
 
 use async_trait::async_trait;
 use discord::command::{Param, StringOption};
-use discord::interaction::{AnyInteraction, InteractionResource, MessageComponent, Webhook};
+use discord::interaction::{
+    AnyInteraction, CreateReply, InteractionResource, MessageComponent, Webhook,
+};
 use discord::request::Discord;
 use discord::user::{self, User};
 use dotenv::dotenv;
@@ -16,12 +18,11 @@ use game::{Flow, Game, GameMessage, GameUI, InteractionDispatcher, Logic};
 
 use discord::application::{self, ApplicationResource};
 use discord::command::CommandData;
-use discord::command::Commands;
+use discord::command::{CommandResource, Commands};
 use discord::gateway::Gateway;
 use discord::gateway::GatewayEvent;
 use discord::interaction::Interaction;
 use discord::request::Result;
-use discord::resource::{Creatable, Deletable, Resource};
 
 use crate::cah::CAH;
 
@@ -29,7 +30,7 @@ mod cah;
 mod game;
 
 async fn purge(commands: Commands, client: &Discord) -> Result<()> {
-    if let Ok(commands) = commands.get(client).await {
+    if let Ok(commands) = commands.all(client).await {
         for command in commands {
             command.delete(client).await?;
         }
@@ -47,7 +48,7 @@ async fn on_command(
             "ping" => {
                 command
                     .token
-                    .reply(&Webhook, |m| m.content("hurb".into()))
+                    .reply(&Webhook, CreateReply::default().content("hurb".into()))
                     .await?;
             }
             "play" => {
@@ -115,7 +116,7 @@ async fn run() -> Result<()> {
     println!("GUILDS");
     for guild in guilds.iter_mut() {
         purge(application.guild_commands(guild), &client).await?;
-        println!(" - {}", guild.get_name(&client).await?);
+        println!(" - {}", guild.get_field(&client, |g| &g.name).await?);
     }
 
     // create commands
@@ -123,7 +124,7 @@ async fn run() -> Result<()> {
 
     application
         .global_commands()
-        .create(&client, &CommandData::new("ping", "Replies with pong!"))
+        .create(&client, CommandData::new("ping", "Replies with pong!"))
         .await?;
 
     // application
@@ -143,7 +144,7 @@ async fn run() -> Result<()> {
         .global_commands()
         .create(
             &client,
-            &CommandData::new("play", "Start a new game").options(vec![StringOption::new(
+            CommandData::new("play", "Start a new game").options(vec![StringOption::new(
                 "game",
                 "What game to play",
             )
@@ -160,7 +161,7 @@ async fn run() -> Result<()> {
         .global_commands()
         .create(
             &client,
-            &CommandData::new("playthread", "Start a new game within a thread").options(vec![
+            CommandData::new("playthread", "Start a new game within a thread").options(vec![
                 StringOption::new("game", "What game to play")
                     .required()
                     .choices(vec![
