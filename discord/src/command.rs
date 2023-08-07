@@ -2,13 +2,11 @@ use derive_setters::Setters;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use crate::request::HttpRequest;
+use crate::resource::resource;
 use crate::resource::Endpoint;
 
-use super::{
-    application::Application,
-    guild::Guild,
-    resource::{Resource, Snowflake},
-};
+use super::{application::Application, guild::Guild, resource::Snowflake};
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub struct Commands {
@@ -171,10 +169,6 @@ impl Commands {
 }
 
 impl Endpoint for Commands {
-    type Result = Command;
-    type Get = Vec<Command>;
-    type Create = CommandData;
-
     fn uri(&self) -> String {
         if let Some(guild) = self.guild_id {
             format!(
@@ -189,16 +183,43 @@ impl Endpoint for Commands {
 }
 
 impl Endpoint for CommandIdentifier {
-    type Result = Command;
-    type Delete = ();
     fn uri(&self) -> String {
         format!("{}/{}", self.command_pool.uri(), self.command_id.as_int())
     }
 }
 
-impl Resource for Command {
-    type Endpoint = CommandIdentifier;
-    fn endpoint(&self) -> &Self::Endpoint {
-        &self.id
+impl Commands {
+    #[resource(Vec<Command>)]
+    pub fn all(&self) -> HttpRequest<Vec<Command>> {
+        HttpRequest::get(self.uri())
+    }
+    #[resource(Command)]
+    pub fn create(&self, data: CommandData) -> HttpRequest<Command> {
+        HttpRequest::post(self.uri(), &data)
+    }
+}
+
+pub trait CommandResource: Sized {
+    fn endpoint(&self) -> CommandIdentifier;
+
+    #[resource(Command)]
+    fn get(&self) -> HttpRequest<Command> {
+        HttpRequest::get(self.endpoint().uri())
+    }
+    #[resource(())]
+    fn delete(self) -> HttpRequest<()> {
+        HttpRequest::delete(self.endpoint().uri())
+    }
+}
+
+impl CommandResource for CommandIdentifier {
+    fn endpoint(&self) -> CommandIdentifier {
+        self.clone()
+    }
+}
+
+impl CommandResource for Command {
+    fn endpoint(&self) -> CommandIdentifier {
+        self.id
     }
 }

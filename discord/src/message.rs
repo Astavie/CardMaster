@@ -1,18 +1,13 @@
-use async_trait::async_trait;
 use derive_setters::Setters;
 use monostate::MustBe;
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::resource::Endpoint;
+use crate::resource::{resource, Endpoint};
 
-use super::request::{Discord, Request, Result};
-use super::{
-    channel::Channel,
-    resource::{Resource, Snowflake},
-    user::PartialUser,
-};
+use super::request::HttpRequest;
+use super::{channel::Channel, resource::Snowflake, user::PartialUser};
 
 #[derive(Debug, Deserialize, Copy, Clone, PartialEq, Eq)]
 pub struct MessageIdentifier {
@@ -201,35 +196,7 @@ struct CreateThread {
     name: String,
 }
 
-#[async_trait]
-pub trait MessageResource: Resource<Endpoint = MessageIdentifier> {
-    fn channel(&self) -> Snowflake<Channel> {
-        self.endpoint().channel_id
-    }
-
-    fn start_thread_request(&self, name: String) -> Request<Channel> {
-        let id = self.endpoint();
-        Request::post(
-            format!(
-                "/channels/{}/messages/{}/threads",
-                id.channel_id.as_int(),
-                id.message_id.as_int()
-            ),
-            &CreateThread { name },
-        )
-    }
-    async fn start_thread(&self, client: &Discord, name: String) -> Result<Channel> {
-        self.start_thread_request(name).request(client).await
-    }
-}
-
-impl<T> MessageResource for T where T: Resource<Endpoint = MessageIdentifier> {}
-
 impl Endpoint for MessageIdentifier {
-    type Result = Message;
-    type Patch = PatchMessage;
-    type Delete = ();
-
     fn uri(&self) -> String {
         format!(
             "/channels/{}/messages/{}",
@@ -239,15 +206,43 @@ impl Endpoint for MessageIdentifier {
     }
 }
 
-impl Resource for Message {
-    type Endpoint = MessageIdentifier;
-    fn endpoint(&self) -> &Self::Endpoint {
-        &self.id
+pub trait MessageResource: Sized {
+    fn endpoint(&self) -> MessageIdentifier;
+
+    #[resource(Message)]
+    fn get(&self) -> HttpRequest<Message> {
+        HttpRequest::get(self.endpoint().uri())
+    }
+    #[resource(Message)]
+    fn patch(&self, data: PatchMessage) -> HttpRequest<Message> {
+        HttpRequest::patch(self.endpoint().uri(), &data)
+    }
+    #[resource(())]
+    fn delete(self) -> HttpRequest<()> {
+        HttpRequest::delete(self.endpoint().uri())
+    }
+
+    #[resource(Channel)]
+    fn start_thread(&self, name: String) -> HttpRequest<Channel> {
+        HttpRequest::post(
+            format!("{}/threads", self.endpoint().uri()),
+            &CreateThread { name },
+        )
     }
 }
-impl Resource for PartialMessage {
-    type Endpoint = MessageIdentifier;
-    fn endpoint(&self) -> &Self::Endpoint {
-        &self.id
+
+impl MessageResource for MessageIdentifier {
+    fn endpoint(&self) -> MessageIdentifier {
+        self.clone()
+    }
+}
+impl MessageResource for Message {
+    fn endpoint(&self) -> MessageIdentifier {
+        self.id
+    }
+}
+impl MessageResource for PartialMessage {
+    fn endpoint(&self) -> MessageIdentifier {
+        self.id
     }
 }
