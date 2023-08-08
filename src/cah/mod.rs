@@ -34,7 +34,7 @@ pub enum CardData {
 impl CardData {
     fn blanks(&self) -> usize {
         match *self {
-            CardData::Raw(ref s) => s.chars().filter(|&c| c == '_').count().min(1),
+            CardData::Raw(ref s) => s.chars().filter(|&c| c == '_').count().max(1),
             CardData::Full { pick, .. } => pick,
         }
     }
@@ -287,6 +287,7 @@ impl Packs {
         let (pack, start_index) = start_indices
             .into_iter()
             .enumerate()
+            .rev()
             .find(|&(_, t)| random >= t)
             .unwrap();
         let card = random - start_index;
@@ -318,6 +319,7 @@ impl Packs {
         let (pack, start_index) = start_indices
             .into_iter()
             .enumerate()
+            .rev()
             .find(|&(_, t)| random >= t)
             .unwrap();
         let card = random - start_index;
@@ -525,10 +527,23 @@ impl Game for CAH {
     fn new(user: User) -> Self {
         CAH::Setup(setup::Setup::new(
             user,
-            Packs(vec![Arc::new((
-                "CAH Base".into(),
-                serde_json::from_str(read_to_string("cards/base.json").unwrap().as_str()).unwrap(),
-            ))]),
+            Packs(vec![
+                Arc::new((
+                    "CAH Base".into(),
+                    serde_json::from_str(read_to_string("cards/base.json").unwrap().as_str())
+                        .unwrap(),
+                )),
+                Arc::new((
+                    "EPPgroep.".into(),
+                    serde_json::from_str(read_to_string("cards/eppgroep.json").unwrap().as_str())
+                        .unwrap(),
+                )),
+                Arc::new((
+                    "EPPgroep.".into(),
+                    serde_json::from_str(read_to_string("cards/eppgroep.json").unwrap().as_str())
+                        .unwrap(),
+                )),
+            ]),
         ))
     }
 

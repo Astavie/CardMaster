@@ -5,7 +5,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use futures_util::future::try_join_all;
+use futures_util::future::{join_all, try_join_all};
 
 use discord::{
     channel::ChannelResource,
@@ -190,7 +190,7 @@ impl GameUI {
         Ok(())
     }
     pub async fn delete_replies(&mut self) -> Result<()> {
-        try_join_all(self.replies.drain().map(|(_, (_, id))| id.delete(&Webhook))).await?;
+        join_all(self.replies.drain().map(|(_, (_, id))| id.delete(&Webhook))).await;
         Ok(())
     }
 }

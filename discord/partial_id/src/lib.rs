@@ -113,8 +113,8 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
             #where_clause
         {
             #vis async fn update(&mut self, client: &crate::request::Bot) -> crate::request::Result<()> {
-                let full: #ty = crate::request::Request::request(crate::request::HttpRequest::get(crate::resource::Endpoint::uri(&self.id)), client).await?;
-                *self = full.into();
+                let full: #ty #ty_generics = crate::request::Request::request(crate::request::HttpRequest::get(crate::resource::Endpoint::uri(&self.id)), client).await?;
+                *self = ::core::convert::Into::into(full);
                 crate::request::Result::Ok(())
             }
             #vis async fn get_field<T>(&mut self, client: &crate::request::Bot, f: fn(&Self) -> &::core::option::Option<T>) -> crate::request::Result<&T> {
