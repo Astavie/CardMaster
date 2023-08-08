@@ -8,17 +8,15 @@ use std::{fmt::Display, fs::read_to_string};
 use async_trait::async_trait;
 use discord::escape_string;
 use discord::message::Field;
-use discord::{
-    interaction::{Interaction, MessageComponent},
-    resource::Snowflake,
-    user::User,
-};
-use rand::seq::{IteratorRandom, SliceRandom};
+use discord::{resource::Snowflake, user::User};
+use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng};
 use serde::Deserialize;
 
-use crate::game::widget::{ChoiceGrid, Event, Widget};
-use crate::game::{widget::SelectionGrid, Flow, Game, GameMessage, GameUI, Logic};
+use crate::enum_str;
+use crate::game::widget::Event;
+use crate::game::ActionResponse;
+use crate::game::{Game, GameMessage};
 
 use self::setup::Setup;
 
@@ -179,25 +177,20 @@ pub struct Player {
     pub kind: PlayerKind,
     pub points: i32,
     pub hand: Vec<Card<{ CardType::White }>>,
-    pub selected: SelectionGrid,
+    pub selected: Vec<Option<usize>>,
 }
 
 impl Player {
-    pub fn new(kind: PlayerKind, cards: usize) -> Self {
+    pub fn new(kind: PlayerKind) -> Self {
         Self {
             kind,
             points: 0,
             hand: Vec::new(),
-            selected: SelectionGrid {
-                count: cards,
-                selected: Vec::new(),
-                disable_unselected: false,
-            },
+            selected: Vec::new(),
         }
     }
     pub fn selected(&self) -> impl Iterator<Item = Option<Card<{ CardType::White }>>> + '_ {
         self.selected
-            .selected
             .iter()
             .copied()
             .map(|i| i.map(|i| self.hand[i]))
@@ -209,7 +202,7 @@ impl Player {
         prompt: Card<{ CardType::Black }>,
     ) -> bool {
         // remove selected cards
-        let mut selected = std::mem::replace(&mut self.selected.selected, Vec::new());
+        let mut selected = std::mem::replace(&mut self.selected, Vec::new());
         selected.sort_unstable_by(|a, b| b.cmp(a));
         for index in selected {
             if let Some(index) = index {
@@ -232,17 +225,11 @@ impl Player {
 
             let mut indices: Vec<_> = (0..max).collect();
             while !prompt.is_filled(packs, self.selected()) {
-                self.selected
-                    .selected
-                    .push(Some(match choose(&mut indices) {
-                        Some(i) => i,
-                        None => return false,
-                    }))
+                self.selected.push(Some(match choose(&mut indices) {
+                    Some(i) => i,
+                    None => return false,
+                }))
             }
-            // registers this as completed
-            self.selected.disable_unselected = true;
-        } else {
-            self.selected.disable_unselected = false;
         }
         true
     }
@@ -319,6 +306,9 @@ pub enum CAH {
     Read(Ingame),
 }
 
+enum_str!(Action: Start, ShowHand, ChangeHand, Continue);
+enum_str!(Panel: Main, Hand);
+
 pub struct Ingame {
     pub packs: Packs,
     pub cards: usize,
@@ -330,17 +320,34 @@ pub struct Ingame {
 }
 
 #[async_trait]
-impl Logic for CAH {
-    type Return = ();
-    async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> Flow<()> {
+impl Game for CAH {
+    type Action = Action;
+    type Panel = Panel;
+
+    const NAME: &'static str = "Crappy Ableist Humor";
+    const COLOR: u32 = 0x000000;
+
+    fn create_panel(
+        &mut self,
+        msg: &mut GameMessage,
+        event: &Event,
+        _panel: Panel,
+    ) -> Option<Action> {
         match self {
             CAH::Setup(s) => {
-                let (msg, done) = (&mut *s).render(Event::component(&i))?;
-                if !done {
-                    ui.update(i, msg).await?;
-                    return Flow::Continue;
-                }
+                // NOTE: assume panel == Main
+                s.create(msg, event);
+            }
+            CAH::Write(_) => todo!(),
+            CAH::Read(_) => todo!(),
+        }
+        None
+    }
 
+    fn on_action(&mut self, _action: Action, _panel: Panel, _user: &User) -> ActionResponse<Panel> {
+        match self {
+            CAH::Setup(s) => {
+                // NOTE: assume action == Start
                 let players: Vec<_> = s.players().collect();
                 let packs = Packs(
                     s.packs
@@ -354,69 +361,53 @@ impl Logic for CAH {
                 );
 
                 if players.len() < 2 {
-                    ui.reply(
-                        i,
-                        GameMessage::new(vec![Field::new("Error", "not enough players")], vec![]),
-                    )
-                    .await?;
-                    return Flow::Continue;
+                    return ActionResponse::Reply(GameMessage::new(
+                        vec![Field::new("Error", "not enough players")],
+                        vec![],
+                    ));
                 }
 
                 let czar = match players.iter().find(|p| matches!(p, PlayerKind::User(_))) {
                     Some(p) => p.clone(),
                     None => {
-                        ui.reply(
-                            i,
-                            GameMessage::new(vec![Field::new("Error", "I know you want to witness the AI uprising, but you can't play a game with only Rando Cardrissian")], vec![]),
-                        )
-                        .await?;
-                        return Flow::Continue;
+                        return ActionResponse::Reply(GameMessage::new(
+                            vec![Field::new(
+                                "Error",
+                                "I know you want to witness the AI uprising, but you can't play a game with only Rando Cardrissian"
+                            )],
+                            vec![],
+                        ));
                     }
                 };
 
-                let mut players = players
-                    .into_iter()
-                    .map(|p| Player::new(p, s.cards as usize))
-                    .collect::<Vec<_>>();
+                let mut players = players.into_iter().map(Player::new).collect::<Vec<_>>();
 
                 let prompt = match s.packs.draw_black() {
                     Some(c) => c,
                     None => {
-                        ui.reply(
-                            i,
-                            GameMessage::new(
-                                vec![Field::new(
-                                    "Error",
-                                    "selected packs do not have any black cards",
-                                )],
-                                vec![],
-                            ),
-                        )
-                        .await?;
-                        return Flow::Continue;
+                        return ActionResponse::Reply(GameMessage::new(
+                            vec![Field::new(
+                                "Error",
+                                "selected packs do not have any black cards",
+                            )],
+                            vec![],
+                        ));
                     }
                 };
 
                 for player in players.iter_mut() {
                     if !player.draw(&mut s.packs, s.cards as usize, prompt) {
-                        ui.reply(
-                            i,
-                            GameMessage::new(
-                                vec![Field::new(
-                                    "Error",
-                                    "selected packs do not have enough white cards to start",
-                                )],
-                                vec![],
-                            ),
-                        )
-                        .await?;
-                        return Flow::Continue;
+                        return ActionResponse::Reply(GameMessage::new(
+                            vec![Field::new(
+                                "Error",
+                                "selected packs do not have enough white cards to start",
+                            )],
+                            vec![],
+                        ));
                     }
                 }
 
                 // start game!
-                ui.delete_replies().await?;
-
                 let ingame = Ingame {
                     packs,
                     cards: s.cards as usize,
@@ -434,93 +425,17 @@ impl Logic for CAH {
                     == 1
                 {
                     // only randos immediately go to Read
-                    // ui.update(i, read.render()).await?;
                     *self = CAH::Read(ingame);
                 } else {
-                    // ui.update(i, write.render()).await?;
                     *self = CAH::Write(ingame);
                 }
-                Flow::Continue
+
+                ActionResponse::RefreshPanel
             }
             CAH::Write(_) => todo!(),
             CAH::Read(_) => todo!(),
         }
-
-        // match self {
-        //     CAH::Write(d) => {
-        //         d.logic(ui, i).await?;
-
-        //         let mut shuffle = (0..d.data.players.len() - 1).collect::<Vec<_>>();
-        //         shuffle.shuffle(&mut rand::thread_rng());
-        //         let read = read::Read {
-        //             choice: ChoiceGrid { shuffle },
-        //             data: std::mem::replace(&mut d.data, DATA_DUMMY),
-        //         };
-        //         ui.delete_replies().await?;
-        //         ui.edit(ui.base_message_id(), read.render()).await?;
-
-        //         *self = CAH::Read(read);
-        //         Flow::Continue
-        //     }
-        //     CAH::Read(d) => {
-        //         let i = d.logic(ui, i).await?;
-
-        //         // new prompt
-        //         d.data.prompt = match d.data.options.packs.draw_black() {
-        //             Some(c) => c,
-        //             None => todo!(),
-        //         };
-
-        //         // draw cards
-        //         for player in d.data.players.iter_mut() {
-        //             if !player.draw(
-        //                 &mut d.data.options.packs,
-        //                 d.data.options.cards,
-        //                 d.data.prompt,
-        //             ) {
-        //                 todo!();
-        //             }
-        //         }
-
-        //         // new czar
-        //         let czar = d
-        //             .data
-        //             .players
-        //             .iter()
-        //             .map(|p| &p.kind)
-        //             .filter(|p| matches!(p, PlayerKind::User(_)))
-        //             .cycle()
-        //             .skip_while(|p| **p != d.data.czar)
-        //             .skip(1)
-        //             .next()
-        //             .unwrap();
-
-        //         ui.delete_replies().await?;
-
-        //         if *czar != d.data.czar {
-        //             d.data.czar = czar.clone();
-
-        //             let write = write::Write {
-        //                 data: std::mem::replace(&mut d.data, DATA_DUMMY),
-        //             };
-        //             ui.update(i, write.render()).await?;
-
-        //             *self = CAH::Write(write);
-        //         } else {
-        //             d.choice.shuffle.shuffle(&mut rand::thread_rng());
-        //             ui.update(i, d.render()).await?;
-        //         }
-
-        //         Flow::Continue
-        //     }
-        // }
     }
-}
-
-#[async_trait]
-impl Game for CAH {
-    const NAME: &'static str = "Crappy Ableist Humor";
-    const COLOR: u32 = 0x000000;
 
     fn new(user: User) -> Self {
         CAH::Setup(Setup {
@@ -533,13 +448,6 @@ impl Game for CAH {
             cards: 10,
             points: 8,
             users: vec![user.id],
-        })
-    }
-
-    fn lobby_msg_reply(&mut self) -> Flow<GameMessage> {
-        Flow::Return(match self {
-            CAH::Setup(s) => s.render(Event::none())?.0,
-            _ => unreachable!(),
         })
     }
 }

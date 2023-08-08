@@ -5,23 +5,19 @@
 
 use std::{env, println};
 
-use async_trait::async_trait;
 use discord::command::{Param, StringOption};
-use discord::interaction::{
-    AnyInteraction, CreateReply, InteractionResource, MessageComponent, Webhook,
-};
+use discord::interaction::{AnyInteraction, CreateReply, InteractionResource, Webhook};
 use discord::request::Discord;
-use discord::user::{self, User};
+use discord::user;
 use dotenv::dotenv;
 use futures_util::StreamExt;
-use game::{Flow, Game, GameMessage, GameUI, InteractionDispatcher, Logic};
+use game::{Game, InteractionDispatcher};
 
 use discord::application::{self, ApplicationResource};
 use discord::command::CommandData;
 use discord::command::{CommandResource, Commands};
 use discord::gateway::Gateway;
 use discord::gateway::GatewayEvent;
-use discord::interaction::Interaction;
 use discord::request::Result;
 
 use crate::cah::CAH;
@@ -54,7 +50,6 @@ async fn on_command(
             "play" => {
                 let game = command.data.options[0].as_string().unwrap();
                 let task = match game {
-                    TestGame::NAME => TestGame::start(command.token, command.user, None),
                     CAH::NAME => CAH::start(command.token, command.user, None),
                     _ => panic!("unknown game"),
                 }
@@ -64,7 +59,6 @@ async fn on_command(
             "playthread" => {
                 let game = command.data.options[0].as_string().unwrap();
                 let task = match game {
-                    TestGame::NAME => TestGame::start(command.token, command.user, Some(client)),
                     CAH::NAME => CAH::start(command.token, command.user, Some(client)),
                     _ => panic!("unknown game"),
                 }
@@ -76,30 +70,6 @@ async fn on_command(
         AnyInteraction::Component(comp) => d.dispatch(comp).await,
     };
     Ok(())
-}
-
-struct TestGame;
-
-#[async_trait]
-impl Logic for TestGame {
-    type Return = ();
-    async fn logic(&mut self, _ui: &mut GameUI, _i: Interaction<MessageComponent>) -> Flow<()> {
-        Flow::Return(())
-    }
-}
-
-#[async_trait]
-impl Game for TestGame {
-    const NAME: &'static str = "Test";
-    const COLOR: u32 = 0xFFFFFF;
-
-    fn new(_user: User) -> Self {
-        TestGame
-    }
-
-    fn lobby_msg_reply(&mut self) -> Flow<GameMessage> {
-        Flow::Return(GameMessage::new(Vec::new(), Vec::new()))
-    }
 }
 
 async fn run() -> Result<()> {
@@ -149,10 +119,7 @@ async fn run() -> Result<()> {
                 "What game to play",
             )
             .required()
-            .choices(vec![
-                Param::new(TestGame::NAME, TestGame::NAME),
-                Param::new(CAH::NAME, CAH::NAME),
-            ])
+            .choices(vec![Param::new(CAH::NAME, CAH::NAME)])
             .into()]),
         )
         .await?;
@@ -164,10 +131,7 @@ async fn run() -> Result<()> {
             CommandData::new("playthread", "Start a new game within a thread").options(vec![
                 StringOption::new("game", "What game to play")
                     .required()
-                    .choices(vec![
-                        Param::new(TestGame::NAME, TestGame::NAME),
-                        Param::new(CAH::NAME, CAH::NAME),
-                    ])
+                    .choices(vec![Param::new(CAH::NAME, CAH::NAME)])
                     .into(),
             ]),
         )

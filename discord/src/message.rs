@@ -87,6 +87,16 @@ impl ActionRow {
             components,
         }
     }
+    pub fn is_full(&self) -> bool {
+        if self.components.len() >= 5 {
+            return false;
+        }
+        return match self.components.first() {
+            Some(ActionRowComponent::Button(_)) => false,
+            None => false,
+            _ => true,
+        };
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize_repr, Deserialize_repr)]

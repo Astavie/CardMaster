@@ -1,11 +1,12 @@
-use crate::game::{
-    widget::{Event, JoinButtons, MultiSelect, NumberSelect, Widget},
-    Flow, GameMessage,
+use crate::game::{widget::Event, GameMessage};
+
+use discord::{
+    message::{ButtonStyle, Field},
+    resource::Snowflake,
+    user::User,
 };
 
-use discord::{message::Field, resource::Snowflake, user::User};
-
-use super::{Packs, PlayerKind};
+use super::{Action, Packs, PlayerKind};
 
 pub struct Setup {
     pub packs: Packs,
@@ -23,46 +24,26 @@ impl Setup {
         let users = self.users.iter().map(|&u| PlayerKind::User(u));
         Iterator::chain(users, bots)
     }
-}
-
-impl Widget for &mut Setup {
-    fn create(self, msg: &mut GameMessage, event: &Event) -> Flow<bool> {
+    pub fn create(&mut self, msg: &mut GameMessage, event: &Event) {
         // pack selection
-        msg.create(
+        msg.create_select(
             event,
-            MultiSelect::new(
-                "packs",
-                self.packs.0.iter().map(|p| p.0.clone()),
-                &mut self.selected_packs,
-            )
-            .name("Packs".into()),
-        )?;
+            "Packs".into(),
+            self.packs.0.iter().map(|p| p.0.clone()),
+            &mut self.selected_packs,
+        );
 
         // bots
-        msg.create(
-            event,
-            NumberSelect::new("bots", &mut self.bots).name("Rando".into()),
-        )?;
+        msg.create_number(event, "Bots".into(), &mut self.bots, 0, i32::MAX);
 
         // cards
-        msg.create(
-            event,
-            NumberSelect::new("cards", &mut self.cards)
-                .min(5)
-                .max(25)
-                .name("Cards".into()),
-        )?;
+        msg.create_number(event, "Cards".into(), &mut self.cards, 5, 25);
 
         // points
-        msg.create(
-            event,
-            NumberSelect::new("cards", &mut self.points)
-                .min(1)
-                .name("Points".into()),
-        )?;
+        msg.create_number(event, "Points".into(), &mut self.points, 1, i32::MAX);
 
         // players
-        msg.create(event, JoinButtons(&mut self.users))?;
+        msg.create_join(event, &mut self.users);
 
         let mut players_str = self
             .players()
@@ -76,6 +57,7 @@ impl Widget for &mut Setup {
 
         msg.fields.push(Field::new("Players", players_str));
 
-        Flow::Return(false)
+        // start button
+        msg.append_action(Action::Start, ButtonStyle::Primary, "Start".into());
     }
 }
