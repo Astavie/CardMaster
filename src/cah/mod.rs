@@ -17,12 +17,14 @@ use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
 use serde::Deserialize;
 
-use crate::game::ui::ChoiceGrid;
-use crate::game::{ui::SelectionGrid, Flow, Game, GameMessage, GameUI, Logic};
+use crate::game::widget::{ChoiceGrid, Event, Widget};
+use crate::game::{widget::SelectionGrid, Flow, Game, GameMessage, GameUI, Logic};
 
-mod read;
+use self::setup::Setup;
+
+// mod write;
+// mod read;
 mod setup;
-mod write;
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -246,24 +248,6 @@ impl Player {
     }
 }
 
-pub struct Data {
-    pub options: setup::Options,
-    pub players: Vec<Player>,
-    pub prompt: Card<{ CardType::Black }>,
-    pub czar: PlayerKind,
-}
-
-const DATA_DUMMY: Data = Data {
-    options: setup::Options {
-        packs: Packs(Vec::new()),
-        cards: 0,
-        points: 0,
-    },
-    players: Vec::new(),
-    prompt: Card { pack: 0, card: 0 },
-    czar: PlayerKind::Rando(0),
-};
-
 impl Packs {
     pub fn draw_black(&mut self) -> Option<Card<{ CardType::Black }>> {
         let start_indices = self
@@ -330,9 +314,19 @@ impl Packs {
 }
 
 pub enum CAH {
-    Setup(setup::Setup),
-    Write(write::Write),
-    Read(read::Read),
+    Setup(Setup),
+    Write(Ingame),
+    Read(Ingame),
+}
+
+pub struct Ingame {
+    pub packs: Packs,
+    pub cards: usize,
+    pub points: i32,
+    pub players: Vec<Player>,
+
+    pub prompt: Card<{ CardType::Black }>,
+    pub czar: PlayerKind,
 }
 
 #[async_trait]
@@ -341,7 +335,23 @@ impl Logic for CAH {
     async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> Flow<()> {
         match self {
             CAH::Setup(s) => {
-                let (i, mut options, players) = s.logic(ui, i).await?;
+                let (msg, done) = (&mut *s).render(Event::component(&i))?;
+                if !done {
+                    ui.update(i, msg).await?;
+                    return Flow::Continue;
+                }
+
+                let players: Vec<_> = s.players().collect();
+                let packs = Packs(
+                    s.packs
+                        .0
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| s.selected_packs.contains(i))
+                        .map(|(_, p)| p)
+                        .cloned()
+                        .collect(),
+                );
 
                 if players.len() < 2 {
                     ui.reply(
@@ -366,10 +376,10 @@ impl Logic for CAH {
 
                 let mut players = players
                     .into_iter()
-                    .map(|p| Player::new(p, options.cards))
+                    .map(|p| Player::new(p, s.cards as usize))
                     .collect::<Vec<_>>();
 
-                let prompt = match options.packs.draw_black() {
+                let prompt = match s.packs.draw_black() {
                     Some(c) => c,
                     None => {
                         ui.reply(
@@ -388,7 +398,7 @@ impl Logic for CAH {
                 };
 
                 for player in players.iter_mut() {
-                    if !player.draw(&mut options.packs, options.cards, prompt) {
+                    if !player.draw(&mut s.packs, s.cards as usize, prompt) {
                         ui.reply(
                             i,
                             GameMessage::new(
@@ -407,109 +417,103 @@ impl Logic for CAH {
                 // start game!
                 ui.delete_replies().await?;
 
-                if players
+                let ingame = Ingame {
+                    packs,
+                    cards: s.cards as usize,
+                    points: s.points,
+                    players,
+                    prompt,
+                    czar,
+                };
+
+                if ingame
+                    .players
                     .iter()
                     .filter(|p| matches!(p.kind, PlayerKind::User(_)))
                     .count()
                     == 1
                 {
                     // only randos immediately go to Read
-                    let mut shuffle = (0..players.len() - 1).collect::<Vec<_>>();
-                    shuffle.shuffle(&mut rand::thread_rng());
-                    let read = read::Read {
-                        choice: ChoiceGrid { shuffle },
-                        data: Data {
-                            options,
-                            players,
-                            prompt,
-                            czar,
-                        },
-                    };
-                    ui.update(i, read.render()).await?;
-
-                    *self = CAH::Read(read);
+                    // ui.update(i, read.render()).await?;
+                    *self = CAH::Read(ingame);
                 } else {
-                    let write = write::Write {
-                        data: Data {
-                            options,
-                            players,
-                            prompt,
-                            czar,
-                        },
-                    };
-                    ui.update(i, write.render()).await?;
-
-                    *self = CAH::Write(write);
+                    // ui.update(i, write.render()).await?;
+                    *self = CAH::Write(ingame);
                 }
                 Flow::Continue
             }
-            CAH::Write(d) => {
-                d.logic(ui, i).await?;
-
-                let mut shuffle = (0..d.data.players.len() - 1).collect::<Vec<_>>();
-                shuffle.shuffle(&mut rand::thread_rng());
-                let read = read::Read {
-                    choice: ChoiceGrid { shuffle },
-                    data: std::mem::replace(&mut d.data, DATA_DUMMY),
-                };
-                ui.delete_replies().await?;
-                ui.edit(ui.base_message_id(), read.render()).await?;
-
-                *self = CAH::Read(read);
-                Flow::Continue
-            }
-            CAH::Read(d) => {
-                let i = d.logic(ui, i).await?;
-
-                // new prompt
-                d.data.prompt = match d.data.options.packs.draw_black() {
-                    Some(c) => c,
-                    None => todo!(),
-                };
-
-                // draw cards
-                for player in d.data.players.iter_mut() {
-                    if !player.draw(
-                        &mut d.data.options.packs,
-                        d.data.options.cards,
-                        d.data.prompt,
-                    ) {
-                        todo!();
-                    }
-                }
-
-                // new czar
-                let czar = d
-                    .data
-                    .players
-                    .iter()
-                    .map(|p| &p.kind)
-                    .filter(|p| matches!(p, PlayerKind::User(_)))
-                    .cycle()
-                    .skip_while(|p| **p != d.data.czar)
-                    .skip(1)
-                    .next()
-                    .unwrap();
-
-                ui.delete_replies().await?;
-
-                if *czar != d.data.czar {
-                    d.data.czar = czar.clone();
-
-                    let write = write::Write {
-                        data: std::mem::replace(&mut d.data, DATA_DUMMY),
-                    };
-                    ui.update(i, write.render()).await?;
-
-                    *self = CAH::Write(write);
-                } else {
-                    d.choice.shuffle.shuffle(&mut rand::thread_rng());
-                    ui.update(i, d.render()).await?;
-                }
-
-                Flow::Continue
-            }
+            CAH::Write(_) => todo!(),
+            CAH::Read(_) => todo!(),
         }
+
+        // match self {
+        //     CAH::Write(d) => {
+        //         d.logic(ui, i).await?;
+
+        //         let mut shuffle = (0..d.data.players.len() - 1).collect::<Vec<_>>();
+        //         shuffle.shuffle(&mut rand::thread_rng());
+        //         let read = read::Read {
+        //             choice: ChoiceGrid { shuffle },
+        //             data: std::mem::replace(&mut d.data, DATA_DUMMY),
+        //         };
+        //         ui.delete_replies().await?;
+        //         ui.edit(ui.base_message_id(), read.render()).await?;
+
+        //         *self = CAH::Read(read);
+        //         Flow::Continue
+        //     }
+        //     CAH::Read(d) => {
+        //         let i = d.logic(ui, i).await?;
+
+        //         // new prompt
+        //         d.data.prompt = match d.data.options.packs.draw_black() {
+        //             Some(c) => c,
+        //             None => todo!(),
+        //         };
+
+        //         // draw cards
+        //         for player in d.data.players.iter_mut() {
+        //             if !player.draw(
+        //                 &mut d.data.options.packs,
+        //                 d.data.options.cards,
+        //                 d.data.prompt,
+        //             ) {
+        //                 todo!();
+        //             }
+        //         }
+
+        //         // new czar
+        //         let czar = d
+        //             .data
+        //             .players
+        //             .iter()
+        //             .map(|p| &p.kind)
+        //             .filter(|p| matches!(p, PlayerKind::User(_)))
+        //             .cycle()
+        //             .skip_while(|p| **p != d.data.czar)
+        //             .skip(1)
+        //             .next()
+        //             .unwrap();
+
+        //         ui.delete_replies().await?;
+
+        //         if *czar != d.data.czar {
+        //             d.data.czar = czar.clone();
+
+        //             let write = write::Write {
+        //                 data: std::mem::replace(&mut d.data, DATA_DUMMY),
+        //             };
+        //             ui.update(i, write.render()).await?;
+
+        //             *self = CAH::Write(write);
+        //         } else {
+        //             d.choice.shuffle.shuffle(&mut rand::thread_rng());
+        //             ui.update(i, d.render()).await?;
+        //         }
+
+        //         Flow::Continue
+        //     }
+        // }
     }
 }
 
@@ -519,19 +523,23 @@ impl Game for CAH {
     const COLOR: u32 = 0x000000;
 
     fn new(user: User) -> Self {
-        CAH::Setup(setup::Setup::new(
-            user,
-            Packs(vec![Arc::new((
+        CAH::Setup(Setup {
+            packs: Packs(vec![Arc::new((
                 "CAH Base".into(),
                 serde_json::from_str(read_to_string("cards/base.json").unwrap().as_str()).unwrap(),
             ))]),
-        ))
+            selected_packs: vec![0],
+            bots: 0,
+            cards: 10,
+            points: 8,
+            users: vec![user.id],
+        })
     }
 
-    fn lobby_msg_reply(&self) -> GameMessage {
-        match self {
-            CAH::Setup(s) => s.render(),
+    fn lobby_msg_reply(&mut self) -> Flow<GameMessage> {
+        Flow::Return(match self {
+            CAH::Setup(s) => s.render(Event::none())?.0,
             _ => unreachable!(),
-        }
+        })
     }
 }

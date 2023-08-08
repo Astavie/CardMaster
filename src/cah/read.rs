@@ -4,7 +4,7 @@ use discord::{
     message::{ActionRow, ActionRowComponent, Button, ButtonStyle, Field},
 };
 
-use crate::game::{ui::ChoiceGrid, Flow, GameMessage, GameUI, Logic, Menu};
+use crate::game::{widget::ChoiceGrid, Flow, GameMessage, GameUI, Logic, Menu};
 
 use super::{Data, PlayerKind};
 

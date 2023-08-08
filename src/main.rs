@@ -97,8 +97,8 @@ impl Game for TestGame {
         TestGame
     }
 
-    fn lobby_msg_reply(&self) -> GameMessage {
-        GameMessage::new(Vec::new(), Vec::new())
+    fn lobby_msg_reply(&mut self) -> Flow<GameMessage> {
+        Flow::Return(GameMessage::new(Vec::new(), Vec::new()))
     }
 }
 

@@ -26,9 +26,9 @@ use discord::{
 mod setup;
 pub use setup::{Setup, SetupOption};
 
-use self::ui::{Event, Widget};
+use self::widget::{Event, Widget};
 
-pub mod ui;
+pub mod widget;
 
 pub const B64_TABLE: [char; 64] = [
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
@@ -97,7 +97,7 @@ impl GameMessage {
     pub fn new(fields: Vec<Field>, components: Vec<ActionRow>) -> Self {
         Self { fields, components }
     }
-    pub fn create<T>(&mut self, event: &Event, widget: impl Widget<Result = T>) -> Flow<Option<T>> {
+    pub fn create(&mut self, event: &Event, widget: impl Widget) -> Flow<bool> {
         widget.create(self, event)
     }
 }
@@ -112,12 +112,10 @@ impl From<Message> for GameMessage {
 }
 
 impl Widget for GameMessage {
-    type Result = ();
-
-    fn create(self, msg: &mut GameMessage, _event: &Event) -> Flow<Option<()>> {
+    fn create(self, msg: &mut GameMessage, _event: &Event) -> Flow<bool> {
         msg.fields.extend(self.fields);
         msg.components.extend(self.components);
-        Flow::Return(Some(()))
+        Flow::Return(true)
     }
 }
 
@@ -125,11 +123,7 @@ impl GameUI {
     pub fn base_message_id(&self) -> Snowflake<Message> {
         self.msg_id
     }
-    pub async fn edit<T>(
-        &self,
-        id: Snowflake<Message>,
-        widget: impl Widget<Result = T>,
-    ) -> Flow<T> {
+    pub async fn edit(&self, id: Snowflake<Message>, widget: impl Widget) -> Flow<()> {
         let (msg, res) = widget.render(Event::none())?;
 
         if id == self.msg_id {
@@ -160,13 +154,17 @@ impl GameUI {
                 .unwrap();
         }
 
-        Flow::Return(res?)
+        if res {
+            Flow::Return(())
+        } else {
+            Flow::Continue
+        }
     }
-    pub async fn reply<T>(
+    pub async fn reply(
         &mut self,
         i: Interaction<MessageComponent>,
-        widget: impl Widget<Result = T>,
-    ) -> Flow<T> {
+        widget: impl Widget,
+    ) -> Flow<()> {
         let (msg, res) = widget.render(Event::component(&i))?;
 
         // we do not sign replies
@@ -185,13 +183,17 @@ impl GameUI {
         let id = response.get(&Webhook).await.unwrap().id.snowflake();
         self.replies.insert(id, response);
 
-        Flow::Return(res?)
+        if res {
+            Flow::Return(())
+        } else {
+            Flow::Continue
+        }
     }
-    pub async fn update<T>(
+    pub async fn update(
         &mut self,
         i: Interaction<MessageComponent>,
-        widget: impl Widget<Result = T>,
-    ) -> Flow<T> {
+        widget: impl Widget,
+    ) -> Flow<()> {
         let (msg, res) = widget.render(Event::component(&i))?;
 
         if i.data.message.id.snowflake() == self.msg_id {
@@ -220,7 +222,11 @@ impl GameUI {
             .unwrap();
         }
 
-        Flow::Return(res?)
+        if res {
+            Flow::Return(())
+        } else {
+            Flow::Continue
+        }
     }
 
     pub async fn delete(&mut self, i: Interaction<MessageComponent>) -> Flow<()> {
@@ -309,17 +315,20 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
     const COLOR: u32;
 
     fn new(user: User) -> Self;
-    fn lobby_msg_reply(&self) -> GameMessage;
+    fn lobby_msg_reply(&mut self) -> Flow<GameMessage>;
 
     async fn start(
         token: InteractionToken<ApplicationCommand>,
         user: User,
         thread: Option<&Discord>,
     ) -> Result<GameTask> {
-        let me = Self::new(user);
+        let mut me = Self::new(user);
 
         // send lobby message
-        let msg = me.lobby_msg_reply();
+        let msg = match me.lobby_msg_reply() {
+            Flow::Return(msg) => msg,
+            _ => panic!(),
+        };
 
         let (id, msg) = match thread {
             Some(discord) => {
