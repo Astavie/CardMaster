@@ -39,7 +39,7 @@ fn resource_impl(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStrea
     let return_type = params.result;
     let client_type = match params.client {
         Some(t) => t,
-        None => parse_quote!(crate::request::Discord),
+        None => parse_quote!(crate::request::Bot),
     };
 
     let result_type = parse_quote!(

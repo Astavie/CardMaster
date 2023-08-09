@@ -7,7 +7,7 @@ use std::{env, println};
 
 use discord::command::{Param, StringOption};
 use discord::interaction::{AnyInteraction, CreateReply, InteractionResource, Webhook};
-use discord::request::Discord;
+use discord::request::Bot;
 use discord::user;
 use dotenv::dotenv;
 use futures_util::StreamExt;
@@ -25,7 +25,7 @@ use crate::cah::CAH;
 mod cah;
 mod game;
 
-async fn purge(commands: Commands, client: &Discord) -> Result<()> {
+async fn purge(commands: Commands, client: &Bot) -> Result<()> {
     if let Ok(commands) = commands.all(client).await {
         for command in commands {
             command.delete(client).await?;
@@ -34,11 +34,7 @@ async fn purge(commands: Commands, client: &Discord) -> Result<()> {
     Ok(())
 }
 
-async fn on_command(
-    i: AnyInteraction,
-    d: &mut InteractionDispatcher,
-    client: &Discord,
-) -> Result<()> {
+async fn on_command(i: AnyInteraction, d: &mut InteractionDispatcher, client: &Bot) -> Result<()> {
     match i {
         AnyInteraction::Command(command) => match command.data.name.as_str() {
             "ping" => {
@@ -78,7 +74,7 @@ async fn run() -> Result<()> {
     let token = env::var("CARDMASTER").expect("Bot token CARDMASTER must be set");
 
     // connect
-    let client = Discord::new(token);
+    let client = Bot::new(token);
     let application = application::Me.get(&client).await?;
 
     // list guilds

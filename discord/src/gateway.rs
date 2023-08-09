@@ -21,7 +21,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, Web
 use crate::request::Request;
 
 use super::request::{self, HttpRequest, RequestError};
-use super::{interaction::AnyInteraction, request::Discord};
+use super::{interaction::AnyInteraction, request::Bot};
 
 struct GatewayState {
     interval: Interval,
@@ -216,7 +216,7 @@ impl Stream for Gateway {
 const NAME: &str = env!("CARGO_PKG_NAME");
 
 impl Gateway {
-    pub async fn connect(client: &Discord) -> request::Result<Self> {
+    pub async fn connect(client: &Bot) -> request::Result<Self> {
         let GatewayResponse { url } = HttpRequest::get("/gateway").request(client).await?;
         let full_url = url + "/?v=10&encoding=json";
 

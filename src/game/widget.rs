@@ -221,6 +221,7 @@ impl GameMessage {
                     None => (),
                 }
 
+                // remove None values at the end
                 while selected.last().is_some_and(|o| o.is_none()) {
                     selected.pop();
                 }
