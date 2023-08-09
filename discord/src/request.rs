@@ -286,7 +286,7 @@ impl Client for Bot {
                 .header("Content-Type", "application/json")
                 .body(body.clone())
                 .unwrap();
-            // println!("{}", request.body());
+            println!("{}", request.body());
             isahc::send_async(request)
         } else {
             let request = http.body(()).unwrap();
@@ -344,7 +344,7 @@ impl Client for Bot {
         }
 
         let string = response.text().await.unwrap();
-        // println!("{}", string);
+        println!("{}", string);
 
         if response.status().is_client_error() {
             return Err(RequestError::ClientError(response.status()));

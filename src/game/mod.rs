@@ -1,11 +1,7 @@
-use std::{
-    collections::HashMap,
-    convert::Infallible,
-    ops::{ControlFlow, FromResidual, Try},
-};
+use std::{collections::HashMap, str::FromStr, unreachable};
 
 use async_trait::async_trait;
-use futures_util::future::{join_all, try_join_all};
+use futures_util::future::join_all;
 
 use discord::{
     channel::ChannelResource,
@@ -22,11 +18,9 @@ use discord::{
     user::User,
 };
 
-// TODO: convert setup to a UI system
-mod setup;
-pub use setup::{Setup, SetupOption};
+use self::widget::Event;
 
-pub mod ui;
+pub mod widget;
 
 pub const B64_TABLE: [char; 64] = [
     'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
@@ -41,7 +35,7 @@ pub struct InteractionDispatcher {
 
 pub struct GameTask {
     ui: GameUI,
-    game: Box<dyn Logic<Return = ()>>,
+    game: Box<dyn Logic>,
 }
 
 impl InteractionDispatcher {
@@ -65,9 +59,9 @@ impl InteractionDispatcher {
         };
 
         let task = &mut self.games[pos];
-        let result = task.game.logic(&mut task.ui, i).await;
+        let is_done = task.game.logic(&mut task.ui, i).await;
 
-        if result.is_done() {
+        if is_done {
             self.games.swap_remove(pos);
         }
     }
@@ -82,202 +76,326 @@ pub struct GameUI {
 
     msg_id: Snowflake<Message>,
     msg: Option<InteractionResponseIdentifier>,
+    panel: &'static str,
+    user: Snowflake<User>,
 
-    replies: HashMap<Snowflake<Message>, (Snowflake<User>, InteractionResponseIdentifier)>,
+    replies: HashMap<Snowflake<Message>, (&'static str, InteractionResponseIdentifier)>,
 }
 
+#[derive(Default)]
 pub struct GameMessage {
-    pub embed: Embed,
+    pub fields: Vec<Field>,
     pub components: Vec<ActionRow>,
 }
 
 impl GameMessage {
-    fn sign(mut self, ui: &GameUI) -> Self {
-        self.embed = self.embed.author(Author::new(ui.name)).color(ui.color);
-        self
-    }
     pub fn new(fields: Vec<Field>, components: Vec<ActionRow>) -> Self {
-        Self {
-            embed: Embed::default().fields(fields),
-            components,
-        }
+        Self { fields, components }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.fields.is_empty() && self.components.is_empty()
     }
 }
 
 impl From<Message> for GameMessage {
     fn from(value: Message) -> Self {
         GameMessage {
-            embed: value.embeds.into_iter().next().unwrap(),
+            fields: value.embeds.into_iter().next().unwrap().fields,
             components: value.components,
         }
     }
 }
 
 impl GameUI {
-    pub async fn edit(&self, message: GameMessage) -> Result<()> {
-        let message = message.sign(self);
-        self.msg
-            .as_ref()
-            .unwrap()
-            .patch(
-                &Webhook,
-                PatchMessage::default()
-                    .embeds(vec![message.embed])
-                    .components(message.components),
-            )
-            .await?;
-        Ok(())
+    pub async fn edit(&self, id: Snowflake<Message>, msg: GameMessage) {
+        if id == self.msg_id {
+            // sign if we are updating the base message
+            self.msg
+                .as_ref()
+                .unwrap()
+                .patch(
+                    &Webhook,
+                    PatchMessage::default()
+                        .embeds(vec![Embed::default()
+                            .author(Author::new(self.name))
+                            .color(self.color)
+                            .fields(msg.fields)])
+                        .components(msg.components),
+                )
+                .await
+                .unwrap();
+        } else {
+            self.replies[&id]
+                .1
+                .patch(
+                    &Webhook,
+                    PatchMessage::default()
+                        .embeds(vec![Embed::default().fields(msg.fields)])
+                        .components(msg.components),
+                )
+                .await
+                .unwrap();
+        }
     }
-    pub async fn reply(
+    pub async fn reply_panel<P: Into<&'static str>>(
         &mut self,
         i: Interaction<MessageComponent>,
-        message: GameMessage,
-    ) -> Result<()> {
-        let user = i.user.id;
-
+        msg: GameMessage,
+        panel: P,
+    ) {
         // we do not sign replies
 
         let response = i
             .reply(
                 &Webhook,
                 CreateReply::default()
-                    .embeds(vec![message.embed])
-                    .components(message.components)
+                    .embeds(vec![Embed::default().fields(msg.fields)])
+                    .components(msg.components)
                     .flags(ReplyFlag::Ephemeral.into()),
             )
-            .await?;
+            .await
+            .unwrap();
 
-        let id = response.get(&Webhook).await?.id.snowflake();
-
-        self.replies.insert(id, (user, response));
-
-        Ok(())
+        let id = response.get(&Webhook).await.unwrap().id.snowflake();
+        self.replies.insert(id, (panel.into(), response));
     }
-    pub async fn update(
-        &mut self,
-        i: Interaction<MessageComponent>,
-        mut message: GameMessage,
-    ) -> Result<()> {
+    pub async fn reply(&mut self, i: Interaction<MessageComponent>, msg: GameMessage) {
+        // we do not sign replies
+        i.reply(
+            &Webhook,
+            CreateReply::default()
+                .embeds(vec![Embed::default().fields(msg.fields)])
+                .components(msg.components)
+                .flags(ReplyFlag::Ephemeral.into()),
+        )
+        .await
+        .unwrap();
+    }
+    pub async fn update(&mut self, i: Interaction<MessageComponent>, msg: GameMessage) {
         if i.data.message.id.snowflake() == self.msg_id {
             // sign if we are updating the base message
-            message = message.sign(self);
             self.msg = Some(
                 i.update(
                     &Webhook,
                     CreateUpdate::default()
-                        .embeds(vec![message.embed])
-                        .components(message.components),
+                        .embeds(vec![Embed::default()
+                            .author(Author::new(self.name))
+                            .color(self.color)
+                            .fields(msg.fields)])
+                        .components(msg.components),
                 )
-                .await?,
+                .await
+                .unwrap(),
             );
         } else {
             i.update(
                 &Webhook,
                 CreateUpdate::default()
-                    .embeds(vec![message.embed])
-                    .components(message.components),
+                    .embeds(vec![Embed::default().fields(msg.fields)])
+                    .components(msg.components),
             )
-            .await?;
+            .await
+            .unwrap();
         }
-        Ok(())
     }
-    pub async fn delete(&mut self, i: Interaction<MessageComponent>) -> Result<()> {
-        let msg = i.data.message.id.snowflake();
-        if let Some((_, id)) = self.replies.remove(&msg) {
-            id.delete(&Webhook).await?;
-        }
-        i.forget();
-        Ok(())
-    }
-    pub async fn delete_replies(&mut self) -> Result<()> {
-        join_all(self.replies.drain().map(|(_, (_, id))| id.delete(&Webhook))).await;
-        Ok(())
+    pub async fn delete_replies(&mut self) {
+        let _ = join_all(self.replies.drain().map(|(_, (_, id))| id.delete(&Webhook))).await;
     }
 }
 
-pub enum Flow<T> {
-    Return(T),
-    Continue,
+#[async_trait]
+trait Logic {
+    async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> bool;
+}
+
+#[async_trait]
+impl<T> Logic for T
+where
+    T: Game + Send,
+{
+    async fn logic(&mut self, ui: &mut GameUI, interaction: Interaction<MessageComponent>) -> bool {
+        let (panel, user_id) = {
+            if interaction.data.message.id.snowflake() == ui.msg_id {
+                (ui.panel, ui.user)
+            } else {
+                (
+                    ui.replies[&interaction.data.message.id.snowflake()].0,
+                    interaction.user.id,
+                )
+            }
+        };
+        let panel = match T::Panel::from_str(panel) {
+            Ok(panel) => panel,
+            Err(_) => unreachable!(),
+        };
+        let mut action = T::Action::from_str(&interaction.data.custom_id).ok();
+
+        let mut panel_msg = GameMessage::default();
+        if action.is_none() {
+            action = self.create_panel(
+                &mut panel_msg,
+                &Event::component(&interaction),
+                panel,
+                user_id,
+            );
+        }
+
+        match action {
+            Some(action) => {
+                let response = self.on_action(action, panel, &interaction.user);
+                match response {
+                    ActionResponse::EditMain => {
+                        // update panel if it should be updated
+                        if !panel_msg.is_empty() {
+                            ui.update(interaction, panel_msg).await;
+                        }
+
+                        // edit main panel
+                        let mut msg = GameMessage::default();
+                        self.create_panel(
+                            &mut msg,
+                            &Event::none(),
+                            match T::Panel::from_str(ui.panel) {
+                                Ok(panel) => panel,
+                                Err(_) => unreachable!(),
+                            },
+                            ui.user,
+                        );
+                        ui.edit(ui.msg_id, msg).await;
+                        false
+                    }
+                    ActionResponse::NextMain => {
+                        // delete replies
+                        ui.delete_replies().await;
+
+                        // update/edit main panel
+                        let mut msg = GameMessage::default();
+                        self.create_panel(&mut msg, &Event::none(), panel, ui.user);
+                        if interaction.data.message.id.snowflake() == ui.msg_id {
+                            ui.update(interaction, msg).await;
+                        } else {
+                            ui.edit(ui.msg_id, msg).await;
+                        }
+                        false
+                    }
+                    ActionResponse::Reply(panel) => {
+                        // create new panel
+                        let mut msg = GameMessage::default();
+                        self.create_panel(&mut msg, &Event::none(), panel, interaction.user.id);
+                        ui.reply_panel(interaction, msg, panel).await;
+                        false
+                    }
+                    ActionResponse::Error(msg) => {
+                        // send error message
+                        ui.reply(interaction, msg).await;
+                        false
+                    }
+                    ActionResponse::Exit => {
+                        // exit
+                        ui.delete_replies().await;
+                        if !panel_msg.is_empty() {
+                            ui.update(interaction, panel_msg).await;
+                        }
+                        true
+                    }
+                    ActionResponse::None => {
+                        // update panel if it should be updated
+                        if !panel_msg.is_empty() {
+                            ui.update(interaction, panel_msg).await;
+                        }
+                        false
+                    }
+                }
+            }
+            None => {
+                // no actions
+                if !panel_msg.is_empty() {
+                    ui.update(interaction, panel_msg).await;
+                }
+                false
+            }
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! enum_str {
+    ( $name:ident : $first:ident $(, $elem:ident)* ) => {
+        #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+        pub enum $name {
+            #[default]
+            $first,
+            $($elem),*
+        }
+        impl std::str::FromStr for $name {
+            type Err = ();
+            fn from_str(s: &str) -> Result<Self, ()> {
+                match s {
+                    stringify!($first) => Ok(Self::$first),
+                    $(stringify!($elem) => Ok(Self::$elem),)*
+                    _ => Err(()),
+                }
+            }
+        }
+        impl<'a> From<$name> for &'a str {
+            fn from(value: $name) -> &'a str {
+                match value {
+                    $name::$first => stringify!($first),
+                    $($name::$elem => stringify!($elem),)*
+                }
+            }
+        }
+    }
+}
+
+pub enum ActionResponse<Panel> {
+    EditMain,
+    NextMain,
+
+    Reply(Panel),
+
+    Error(GameMessage),
     Exit,
-}
 
-impl<T> Flow<T> {
-    pub fn is_done(&self) -> bool {
-        match self {
-            Self::Continue => false,
-            _ => true,
-        }
-    }
-}
-
-impl<T> Try for Flow<T> {
-    type Output = T;
-    type Residual = Flow<Infallible>;
-
-    fn from_output(output: Self::Output) -> Self {
-        Self::Return(output)
-    }
-
-    fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
-        match self {
-            Flow::Return(t) => ControlFlow::Continue(t),
-            Flow::Continue => ControlFlow::Break(Flow::Continue),
-            Flow::Exit => ControlFlow::Break(Flow::Exit),
-        }
-    }
-}
-
-impl<T> FromResidual for Flow<T> {
-    fn from_residual(residual: Flow<Infallible>) -> Self {
-        match residual {
-            Flow::Continue => Flow::Continue,
-            Flow::Exit => Flow::Exit,
-        }
-    }
-}
-
-impl<T> FromResidual<Option<Infallible>> for Flow<T> {
-    fn from_residual(residual: Option<Infallible>) -> Self {
-        match residual {
-            None => Flow::Continue,
-        }
-    }
-}
-
-pub trait Menu {
-    type Update;
-    fn render(&self) -> Vec<ActionRow>;
-    fn update(&mut self, it: &Interaction<MessageComponent>) -> Flow<Self::Update>;
+    None,
 }
 
 #[async_trait]
-pub trait Logic {
-    type Return;
-    async fn logic(
-        &mut self,
-        ui: &mut GameUI,
-        i: Interaction<MessageComponent>,
-    ) -> Flow<Self::Return>;
-}
+pub trait Game: Sized + 'static {
+    type Action: FromStr + Into<&'static str> + Send;
+    type Panel: FromStr + Into<&'static str> + Send + Copy + Default;
 
-#[async_trait]
-pub trait Game: Logic<Return = ()> + Sized + 'static {
     const NAME: &'static str;
     const COLOR: u32;
 
     fn new(user: User) -> Self;
-    fn lobby_msg_reply(&self) -> GameMessage;
+
+    fn create_panel(
+        &mut self,
+        msg: &mut GameMessage,
+        event: &Event,
+        panel: Self::Panel,
+        user: Snowflake<User>,
+    ) -> Option<Self::Action>;
+
+    fn on_action(
+        &mut self,
+        action: Self::Action,
+        panel: Self::Panel,
+        user: &User,
+    ) -> ActionResponse<Self::Panel>;
 
     async fn start(
         token: InteractionToken<ApplicationCommand>,
         user: User,
         thread: Option<&Bot>,
     ) -> Result<GameTask> {
-        let me = Self::new(user);
+        let user_id = user.id;
+        let mut me = Self::new(user);
 
         // send lobby message
-        let mut msg = me.lobby_msg_reply();
-        msg.embed = msg.embed.author(Author::new(Self::NAME)).color(Self::COLOR);
+        let mut msg = GameMessage::default();
+        me.create_panel(&mut msg, &Event::none(), Self::Panel::default(), user_id);
 
         let (id, msg) = match thread {
             Some(discord) => {
@@ -299,7 +417,10 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
                     .send_message(
                         discord,
                         CreateMessage::default()
-                            .embeds(vec![msg.embed])
+                            .embeds(vec![Embed::default()
+                                .author(Author::new(Self::NAME))
+                                .color(Self::COLOR)
+                                .fields(msg.fields)])
                             .components(msg.components),
                     )
                     .await?;
@@ -310,7 +431,10 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
                     .reply(
                         &Webhook,
                         CreateReply::default()
-                            .embeds(vec![msg.embed])
+                            .embeds(vec![Embed::default()
+                                .author(Author::new(Self::NAME))
+                                .color(Self::COLOR)
+                                .fields(msg.fields)])
                             .components(msg.components),
                     )
                     .await?;
@@ -322,10 +446,12 @@ pub trait Game: Logic<Return = ()> + Sized + 'static {
         // create task
         Ok(GameTask {
             ui: GameUI {
+                user: user_id,
                 name: Self::NAME,
                 color: Self::COLOR,
                 msg: id,
                 msg_id: msg.id.snowflake(),
+                panel: Self::Panel::default().into(),
                 replies: HashMap::new(),
             },
             game: Box::new(me),
