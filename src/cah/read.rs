@@ -1,163 +1,124 @@
-use async_trait::async_trait;
-use discord::{
-    interaction::{Interaction, MessageComponent},
-    message::{ActionRow, ActionRowComponent, Button, ButtonStyle, Field},
-};
+use discord::message::{ActionRow, ActionRowComponent, Button, ButtonStyle, Field};
+use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 
-use crate::game::{widget::ChoiceGrid, Flow, GameMessage, GameUI, Logic, Menu};
+use crate::game::{widget::Event, GameMessage, B64_TABLE};
 
-use super::{Data, PlayerKind};
+use super::{Action, Ingame, Player, PlayerKind};
 
-pub struct Read {
-    pub data: Data,
-    pub choice: ChoiceGrid,
-}
-
-impl Read {
-    pub fn render(&self) -> GameMessage {
-        let points = self
-            .data
+impl Ingame {
+    pub fn random_indices(&self) -> Vec<&Player> {
+        let mut indices: Vec<_> = self
             .players
             .iter()
-            .map(|p| {
-                format!(
-                    "{} `{:2}` {}",
-                    if p.kind == self.data.czar {
-                        "👑"
-                    } else {
-                        "✅"
-                    },
-                    p.points,
-                    p.kind,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let answers = self
-            .choice
-            .shuffle
-            .iter()
-            .copied()
-            .map(|i| {
-                self.data
-                    .players
-                    .iter()
-                    .filter(|p| p.kind != self.data.czar)
-                    .nth(i)
-                    .unwrap()
-            })
-            .enumerate()
-            .map(|(i, p)| {
-                format!(
-                    "{}. {}",
-                    i + 1,
-                    self.data
-                        .prompt
-                        .fill(&self.data.options.packs, p.selected())
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        GameMessage::new(
-            vec![
-                Field::new("Players", points),
-                Field::new("Answers", answers),
-            ],
-            self.choice.render(),
-        )
+            .filter(|p| p.kind != self.czar)
+            .collect();
+        let mut rng: StdRng =
+            SeedableRng::seed_from_u64((self.prompt.pack as u64) << 32 | (self.prompt.card as u64));
+        indices.shuffle(&mut rng);
+        indices
     }
-}
-
-#[async_trait]
-impl Logic for Read {
-    type Return = Interaction<MessageComponent>;
-    async fn logic(
-        &mut self,
-        ui: &mut GameUI,
-        i: Interaction<MessageComponent>,
-    ) -> Flow<Self::Return> {
-        if i.data.custom_id == "continue" {
-            return Flow::Return(i);
+    pub fn create_read(&mut self, msg: &mut GameMessage, event: &Event) -> Option<Action> {
+        if let PlayerKind::User(user) = self.czar {
+            if let Some(i) = event
+                .custom_id_number("#", user)
+                .filter(|&i| i < self.players.len() - 1)
+            {
+                return self.create_winner(msg, i);
+            }
         }
 
-        // select winner
-        let index = self.choice.update(&i)?;
+        msg.fields.push(Field::new(
+            "Players",
+            self.players
+                .iter()
+                .map(|p| {
+                    format!(
+                        "{} `{:2}` {}",
+                        if p.kind == self.czar { "👑" } else { "✅" },
+                        p.points,
+                        p.kind,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ));
 
-        if self.data.czar != PlayerKind::User(i.user.id) {
-            ui.reply(
-                i,
-                GameMessage::new(
-                    vec![Field::new("Error", "you are not the Card Czar")],
-                    vec![],
-                ),
-            )
-            .await?;
-            return Flow::Continue;
+        msg.fields.push(Field::new(
+            "Answers",
+            self.random_indices()
+                .iter()
+                .enumerate()
+                .map(|(i, p)| format!("{}. {}", i + 1, self.prompt.fill(&self.packs, p.selected())))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ));
+
+        // picker
+        let mut iter = 0..self.players.len() - 1;
+        loop {
+            let mut buttons = Vec::new();
+            for _ in 0..5 {
+                match iter.next() {
+                    Some(i) => {
+                        buttons.push(ActionRowComponent::Button(Button::Action {
+                            style: ButtonStyle::Primary,
+                            custom_id: format!("#{}", B64_TABLE[i]),
+                            label: Some((i + 1).to_string()),
+                            disabled: false,
+                        }));
+                    }
+                    None => {
+                        if !buttons.is_empty() {
+                            msg.components.push(ActionRow::new(buttons));
+                        }
+                        return None;
+                    }
+                }
+            }
+            msg.components.push(ActionRow::new(buttons));
         }
-
-        let winner = self
-            .data
+    }
+    fn create_winner(&mut self, msg: &mut GameMessage, i: usize) -> Option<Action> {
+        let mut indices: Vec<_> = self
             .players
             .iter_mut()
-            .filter(|p| p.kind != self.data.czar)
-            .nth(index)?;
+            .filter(|p| p.kind != self.czar)
+            .collect();
+        let mut rng: StdRng =
+            SeedableRng::seed_from_u64((self.prompt.pack as u64) << 32 | (self.prompt.card as u64));
+        indices.shuffle(&mut rng);
 
+        let winner = &mut *indices[i];
         winner.points += 1;
         let total_points = winner.points;
 
         let name = winner.kind.to_string();
-        let answer = self
-            .data
-            .prompt
-            .fill(&self.data.options.packs, winner.selected());
+        let answer = self.prompt.fill(&self.packs, winner.selected());
 
         let points = self
-            .data
             .players
             .iter()
             .map(|p| format!("`{:2}` {}", p.points, p.kind,))
             .collect::<Vec<_>>()
             .join("\n");
 
-        if total_points >= self.data.options.points {
-            ui.update(
-                i,
-                GameMessage::new(
-                    vec![
-                        Field::new("Players", points),
-                        Field::new(
-                            "We have a winner!",
-                            format!("{} won the game with `{}` points!", name, total_points),
-                        ),
-                        Field::new("Last words", format!(">>> {}", answer)),
-                    ],
-                    vec![],
+        return if total_points >= self.points {
+            msg.fields.extend(vec![
+                Field::new("Players", points),
+                Field::new(
+                    "We have a winner!",
+                    format!("{} won the game with `{}` points!", name, total_points),
                 ),
-            )
-            .await?;
-            Flow::Exit
+                Field::new("Last words", format!(">>> {}", answer)),
+            ]);
+            Some(Action::Done)
         } else {
-            ui.update(
-                i,
-                GameMessage::new(
-                    vec![
-                        Field::new("Players", points),
-                        Field::new("Round Winner", format!("{}\n\n>>> {}", name, answer)),
-                    ],
-                    vec![ActionRow::new(vec![ActionRowComponent::Button(
-                        Button::Action {
-                            style: ButtonStyle::Primary,
-                            custom_id: "continue".into(),
-                            label: Some("Continue".into()),
-                            disabled: false,
-                        },
-                    )])],
-                ),
-            )
-            .await?;
-            Flow::Continue
-        }
+            msg.fields.extend(vec![
+                Field::new("Players", points),
+                Field::new("Round Winner", format!("{}\n\n>>> {}", name, answer)),
+            ]);
+            msg.append_action(Action::Continue, ButtonStyle::Primary, "Continue".into());
+            None
+        };
     }
 }

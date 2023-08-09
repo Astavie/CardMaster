@@ -22,10 +22,17 @@ impl<'a> Event<'a> {
     }
 
     pub fn custom_id(&self) -> Option<&str> {
-        match self.interaction {
-            Some(i) => Some(&i.data.custom_id),
-            None => None,
+        Some(&self.interaction?.data.custom_id)
+    }
+    pub fn custom_id_number(&self, prefix: &str, user: Snowflake<User>) -> Option<usize> {
+        if self.interaction?.user.id != user {
+            return None;
         }
+
+        let id = &self.interaction?.data.custom_id;
+        let s = id.strip_prefix(prefix)?;
+        let c = s.chars().next()?;
+        B64_TABLE.iter().position(|&p| p == c)
     }
     pub fn values(&self, id: &str) -> Option<&Vec<String>> {
         match self.interaction {
@@ -81,7 +88,7 @@ impl GameMessage {
                 *selected = v
                     .iter()
                     .filter_map(|s| {
-                        let first = s.chars().next().unwrap();
+                        let first = s.chars().next()?;
                         B64_TABLE.iter().position(|&c| c == first)
                     })
                     .collect();
@@ -188,5 +195,76 @@ impl GameMessage {
                 },
             ),
         ]));
+    }
+    pub fn create_select_grid(
+        &mut self,
+        event: &Event,
+        user: Snowflake<User>,
+        count: usize,
+        selected: &mut Vec<Option<usize>>,
+        done: impl FnOnce(&Vec<Option<usize>>) -> bool,
+    ) -> bool {
+        // TODO: scrolling if too big
+
+        let mut changed = false;
+        let mut is_done = false;
+
+        if let Some(i) = event.custom_id_number("#", user).filter(|&i| i < count) {
+            if selected.contains(&Some(i)) {
+                // we are not done anymore
+                changed = done(selected);
+                is_done = false;
+
+                let pos = selected.iter_mut().find(|&&mut s| s == Some(i));
+                match pos {
+                    Some(s) => *s = None,
+                    None => (),
+                }
+
+                while selected.last().is_some_and(|o| o.is_none()) {
+                    selected.pop();
+                }
+            } else {
+                let pos = selected.iter_mut().find(|&&mut s| s.is_none());
+                match pos {
+                    Some(s) => *s = Some(i),
+                    None => selected.push(Some(i)),
+                }
+
+                // if we are now done it has changed
+                changed = done(selected);
+                is_done = changed;
+            }
+        } else {
+            is_done = done(selected);
+        }
+
+        let mut iter = 0..count;
+        loop {
+            let mut buttons = Vec::new();
+            for _ in 0..5 {
+                match iter.next() {
+                    Some(i) => {
+                        let is_pressed = selected.contains(&Some(i));
+                        buttons.push(ActionRowComponent::Button(Button::Action {
+                            style: match is_pressed {
+                                true => ButtonStyle::Success,
+                                false => ButtonStyle::Secondary,
+                            },
+                            custom_id: format!("#{}", B64_TABLE[i]),
+                            label: Some((i + 1).to_string()),
+                            disabled: !is_pressed && is_done,
+                        }));
+                    }
+                    None => {
+                        if !buttons.is_empty() {
+                            self.components.push(ActionRow::new(buttons));
+                        }
+                        return changed;
+                    }
+                }
+            }
+            self.components.push(ActionRow::new(buttons));
+        }
     }
 }

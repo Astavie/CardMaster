@@ -1,9 +1,9 @@
 use std::fmt::{self, Formatter};
 use std::marker::ConstParamTy;
-use std::matches;
 use std::ops::Index;
 use std::sync::Arc;
 use std::{fmt::Display, fs::read_to_string};
+use std::{matches, mem};
 
 use async_trait::async_trait;
 use discord::escape_string;
@@ -20,9 +20,9 @@ use crate::game::{Game, GameMessage};
 
 use self::setup::Setup;
 
-// mod write;
-// mod read;
+mod read;
 mod setup;
+mod write;
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -135,7 +135,7 @@ impl Card<{ CardType::Black }> {
             }
         }
 
-        cards >= blanks
+        cards == blanks
     }
 }
 
@@ -306,7 +306,7 @@ pub enum CAH {
     Read(Ingame),
 }
 
-enum_str!(Action: Start, ShowHand, ChangeHand, Continue);
+enum_str!(Action: Start, ShowHand, ChangeHand, Continue, Done);
 enum_str!(Panel: Main, Hand);
 
 pub struct Ingame {
@@ -331,23 +331,27 @@ impl Game for CAH {
         &mut self,
         msg: &mut GameMessage,
         event: &Event,
-        _panel: Panel,
+        panel: Panel,
+        user: Snowflake<User>,
     ) -> Option<Action> {
         match self {
-            CAH::Setup(s) => {
-                // NOTE: assume panel == Main
-                s.create(msg, event);
-            }
-            CAH::Write(_) => todo!(),
-            CAH::Read(_) => todo!(),
+            CAH::Setup(s) => s.create(msg, event),
+            CAH::Write(i) => i.create_write(msg, event, panel, user),
+            CAH::Read(i) => i.create_read(msg, event),
         }
-        None
     }
 
-    fn on_action(&mut self, _action: Action, _panel: Panel, _user: &User) -> ActionResponse<Panel> {
+    fn on_action(&mut self, action: Action, _panel: Panel, _user: &User) -> ActionResponse<Panel> {
+        if action == Action::Done {
+            return ActionResponse::Exit;
+        }
+
         match self {
             CAH::Setup(s) => {
-                // NOTE: assume action == Start
+                if action != Action::Start {
+                    return ActionResponse::None;
+                }
+
                 let players: Vec<_> = s.players().collect();
                 let packs = Packs(
                     s.packs
@@ -361,7 +365,7 @@ impl Game for CAH {
                 );
 
                 if players.len() < 2 {
-                    return ActionResponse::Reply(GameMessage::new(
+                    return ActionResponse::Error(GameMessage::new(
                         vec![Field::new("Error", "not enough players")],
                         vec![],
                     ));
@@ -370,7 +374,7 @@ impl Game for CAH {
                 let czar = match players.iter().find(|p| matches!(p, PlayerKind::User(_))) {
                     Some(p) => p.clone(),
                     None => {
-                        return ActionResponse::Reply(GameMessage::new(
+                        return ActionResponse::Error(GameMessage::new(
                             vec![Field::new(
                                 "Error",
                                 "I know you want to witness the AI uprising, but you can't play a game with only Rando Cardrissian"
@@ -385,7 +389,7 @@ impl Game for CAH {
                 let prompt = match s.packs.draw_black() {
                     Some(c) => c,
                     None => {
-                        return ActionResponse::Reply(GameMessage::new(
+                        return ActionResponse::Error(GameMessage::new(
                             vec![Field::new(
                                 "Error",
                                 "selected packs do not have any black cards",
@@ -397,7 +401,7 @@ impl Game for CAH {
 
                 for player in players.iter_mut() {
                     if !player.draw(&mut s.packs, s.cards as usize, prompt) {
-                        return ActionResponse::Reply(GameMessage::new(
+                        return ActionResponse::Error(GameMessage::new(
                             vec![Field::new(
                                 "Error",
                                 "selected packs do not have enough white cards to start",
@@ -430,10 +434,84 @@ impl Game for CAH {
                     *self = CAH::Write(ingame);
                 }
 
-                ActionResponse::RefreshPanel
+                ActionResponse::NextMain
             }
-            CAH::Write(_) => todo!(),
-            CAH::Read(_) => todo!(),
+            CAH::Write(i) => match action {
+                Action::ShowHand => ActionResponse::Reply(Panel::Hand),
+                Action::ChangeHand => {
+                    if i.players
+                        .iter()
+                        .all(|p| i.czar == p.kind || i.prompt.is_filled(&i.packs, p.selected()))
+                    {
+                        *self = CAH::Read(unsafe {
+                            mem::replace(
+                                i,
+                                Ingame {
+                                    packs: Packs(Vec::new()),
+                                    cards: 0,
+                                    points: 0,
+                                    players: Vec::new(),
+                                    prompt: mem::zeroed(),
+                                    czar: mem::zeroed(),
+                                },
+                            )
+                        });
+                        ActionResponse::NextMain
+                    } else {
+                        ActionResponse::EditMain
+                    }
+                }
+                _ => ActionResponse::None,
+            },
+            CAH::Read(i) => {
+                if action != Action::Continue {
+                    return ActionResponse::None;
+                }
+
+                // new prompt
+                i.prompt = match i.packs.draw_black() {
+                    Some(c) => c,
+                    None => todo!("no black cards"),
+                };
+
+                // draw cards
+                for player in i.players.iter_mut() {
+                    if !player.draw(&mut i.packs, i.cards, i.prompt) {
+                        todo!("no white cards");
+                    }
+                }
+
+                // new czar
+                let czar = i
+                    .players
+                    .iter()
+                    .map(|p| &p.kind)
+                    .filter(|p| matches!(p, PlayerKind::User(_)))
+                    .cycle()
+                    .skip_while(|p| **p != i.czar)
+                    .skip(1)
+                    .next()
+                    .unwrap();
+
+                if *czar != i.czar {
+                    i.czar = czar.clone();
+                    *self = CAH::Write(unsafe {
+                        mem::replace(
+                            i,
+                            Ingame {
+                                packs: Packs(Vec::new()),
+                                cards: 0,
+                                points: 0,
+                                players: Vec::new(),
+                                prompt: mem::zeroed(),
+                                czar: mem::zeroed(),
+                            },
+                        )
+                    });
+                }
+
+                ActionResponse::NextMain
+            }
         }
     }
 

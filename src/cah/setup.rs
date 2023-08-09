@@ -24,7 +24,7 @@ impl Setup {
         let users = self.users.iter().map(|&u| PlayerKind::User(u));
         Iterator::chain(users, bots)
     }
-    pub fn create(&mut self, msg: &mut GameMessage, event: &Event) {
+    pub fn create(&mut self, msg: &mut GameMessage, event: &Event) -> Option<Action> {
         // pack selection
         msg.create_select(
             event,
@@ -59,5 +59,7 @@ impl Setup {
 
         // start button
         msg.append_action(Action::Start, ButtonStyle::Primary, "Start".into());
+
+        None
     }
 }

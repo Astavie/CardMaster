@@ -77,6 +77,7 @@ pub struct GameUI {
     msg_id: Snowflake<Message>,
     msg: Option<InteractionResponseIdentifier>,
     panel: &'static str,
+    user: Snowflake<User>,
 
     replies: HashMap<Snowflake<Message>, (&'static str, InteractionResponseIdentifier)>,
 }
@@ -170,43 +171,6 @@ impl GameUI {
         .await
         .unwrap();
     }
-    pub async fn update_panel<P: Into<&'static str>>(
-        &mut self,
-        i: Interaction<MessageComponent>,
-        msg: GameMessage,
-        panel: P,
-    ) {
-        if i.data.message.id.snowflake() == self.msg_id {
-            // sign if we are updating the base message
-            self.panel = panel.into();
-            self.msg = Some(
-                i.update(
-                    &Webhook,
-                    CreateUpdate::default()
-                        .embeds(vec![Embed::default()
-                            .author(Author::new(self.name))
-                            .color(self.color)
-                            .fields(msg.fields)])
-                        .components(msg.components),
-                )
-                .await
-                .unwrap(),
-            );
-        } else {
-            self.replies
-                .get_mut(&i.data.message.id.snowflake())
-                .unwrap()
-                .0 = panel.into();
-            i.update(
-                &Webhook,
-                CreateUpdate::default()
-                    .embeds(vec![Embed::default().fields(msg.fields)])
-                    .components(msg.components),
-            )
-            .await
-            .unwrap();
-        }
-    }
     pub async fn update(&mut self, i: Interaction<MessageComponent>, msg: GameMessage) {
         if i.data.message.id.snowflake() == self.msg_id {
             // sign if we are updating the base message
@@ -250,11 +214,14 @@ where
     T: Game + Send,
 {
     async fn logic(&mut self, ui: &mut GameUI, interaction: Interaction<MessageComponent>) -> bool {
-        let panel = {
+        let (panel, user_id) = {
             if interaction.data.message.id.snowflake() == ui.msg_id {
-                ui.panel
+                (ui.panel, ui.user)
             } else {
-                ui.replies[&interaction.data.message.id.snowflake()].0
+                (
+                    ui.replies[&interaction.data.message.id.snowflake()].0,
+                    interaction.user.id,
+                )
             }
         };
         let panel = match T::Panel::from_str(panel) {
@@ -265,14 +232,19 @@ where
 
         let mut panel_msg = GameMessage::default();
         if action.is_none() {
-            action = self.create_panel(&mut panel_msg, &Event::component(&interaction), panel);
+            action = self.create_panel(
+                &mut panel_msg,
+                &Event::component(&interaction),
+                panel,
+                user_id,
+            );
         }
 
         match action {
             Some(action) => {
                 let response = self.on_action(action, panel, &interaction.user);
                 match response {
-                    ActionResponse::RefreshMain => {
+                    ActionResponse::EditMain => {
                         // update panel if it should be updated
                         if !panel_msg.is_empty() {
                             ui.update(interaction, panel_msg).await;
@@ -287,38 +259,43 @@ where
                                 Ok(panel) => panel,
                                 Err(_) => unreachable!(),
                             },
+                            ui.user,
                         );
                         ui.edit(ui.msg_id, msg).await;
                         false
                     }
-                    ActionResponse::RefreshPanel => {
-                        // delete replies if we are refreshing the main panel
-                        if interaction.data.message.id.snowflake() == ui.msg_id {
-                            ui.delete_replies().await;
-                        }
+                    ActionResponse::NextMain => {
+                        // delete replies
+                        ui.delete_replies().await;
 
-                        // update panel
+                        // update/edit main panel
                         let mut msg = GameMessage::default();
-                        self.create_panel(&mut msg, &Event::none(), panel);
-                        ui.update_panel(interaction, msg, panel).await;
+                        self.create_panel(&mut msg, &Event::none(), panel, ui.user);
+                        if interaction.data.message.id.snowflake() == ui.msg_id {
+                            ui.update(interaction, msg).await;
+                        } else {
+                            ui.edit(ui.msg_id, msg).await;
+                        }
                         false
                     }
-                    ActionResponse::NewPanel(panel) => {
+                    ActionResponse::Reply(panel) => {
                         // create new panel
                         let mut msg = GameMessage::default();
-                        self.create_panel(&mut msg, &Event::none(), panel);
+                        self.create_panel(&mut msg, &Event::none(), panel, interaction.user.id);
                         ui.reply_panel(interaction, msg, panel).await;
                         false
                     }
-                    ActionResponse::Reply(msg) => {
-                        // send quick message
+                    ActionResponse::Error(msg) => {
+                        // send error message
                         ui.reply(interaction, msg).await;
                         false
                     }
-                    ActionResponse::Exit(msg) => {
-                        // exit with message
+                    ActionResponse::Exit => {
+                        // exit
                         ui.delete_replies().await;
-                        ui.update(interaction, msg).await;
+                        if !panel_msg.is_empty() {
+                            ui.update(interaction, panel_msg).await;
+                        }
                         true
                     }
                     ActionResponse::None => {
@@ -332,7 +309,9 @@ where
             }
             None => {
                 // no actions
-                ui.update(interaction, panel_msg).await;
+                if !panel_msg.is_empty() {
+                    ui.update(interaction, panel_msg).await;
+                }
                 false
             }
         }
@@ -370,13 +349,13 @@ macro_rules! enum_str {
 }
 
 pub enum ActionResponse<Panel> {
-    RefreshMain,
+    EditMain,
+    NextMain,
 
-    RefreshPanel,
-    NewPanel(Panel),
+    Reply(Panel),
 
-    Reply(GameMessage),
-    Exit(GameMessage),
+    Error(GameMessage),
+    Exit,
 
     None,
 }
@@ -396,6 +375,7 @@ pub trait Game: Sized + 'static {
         msg: &mut GameMessage,
         event: &Event,
         panel: Self::Panel,
+        user: Snowflake<User>,
     ) -> Option<Self::Action>;
 
     fn on_action(
@@ -410,11 +390,12 @@ pub trait Game: Sized + 'static {
         user: User,
         thread: Option<&Discord>,
     ) -> Result<GameTask> {
+        let user_id = user.id;
         let mut me = Self::new(user);
 
         // send lobby message
         let mut msg = GameMessage::default();
-        me.create_panel(&mut msg, &Event::none(), Self::Panel::default());
+        me.create_panel(&mut msg, &Event::none(), Self::Panel::default(), user_id);
 
         let (id, msg) = match thread {
             Some(discord) => {
@@ -465,6 +446,7 @@ pub trait Game: Sized + 'static {
         // create task
         Ok(GameTask {
             ui: GameUI {
+                user: user_id,
                 name: Self::NAME,
                 color: Self::COLOR,
                 msg: id,
