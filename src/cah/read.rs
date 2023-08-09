@@ -56,7 +56,13 @@ impl Ingame {
             self.random_indices()
                 .iter()
                 .enumerate()
-                .map(|(i, p)| format!("{}. {}", i + 1, self.prompt.fill(&self.packs, p.selected())))
+                .map(|(i, p)| {
+                    format!(
+                        "{}. {}",
+                        i + 1,
+                        self.prompt.fill(&self.packs, &mut p.selected())
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n"),
         ));
@@ -101,7 +107,7 @@ impl Ingame {
         let total_points = winner.points;
 
         let name = winner.kind.to_string();
-        let answer = self.prompt.fill(&self.packs, winner.selected());
+        let answer = self.prompt.fill(&self.packs, &mut winner.selected());
 
         let points = self
             .players

@@ -71,7 +71,7 @@ impl Ingame {
 
                     msg.fields.push(Field::new(
                         "Answer",
-                        self.prompt.fill(&self.packs, player.selected()),
+                        self.prompt.fill(&self.packs, &mut player.selected()),
                     ));
                 }
 

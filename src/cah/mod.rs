@@ -3,7 +3,7 @@ use std::marker::ConstParamTy;
 use std::ops::Index;
 use std::sync::Arc;
 use std::{fmt::Display, fs::read_to_string};
-use std::{matches, mem};
+use std::{matches, mem, println};
 
 use async_trait::async_trait;
 use discord::escape_string;
@@ -32,9 +32,15 @@ pub enum CardData {
 }
 
 impl CardData {
-    fn blanks(&self) -> usize {
+    fn blanks_black(&self) -> usize {
         match *self {
             CardData::Raw(ref s) => s.chars().filter(|&c| c == '_').count().max(1),
+            CardData::Full { pick, .. } => pick,
+        }
+    }
+    fn blanks_white(&self) -> usize {
+        match *self {
+            CardData::Raw(ref s) => s.chars().filter(|&c| c == '_').count(),
             CardData::Full { pick, .. } => pick,
         }
     }
@@ -79,56 +85,23 @@ pub struct Card<const TYPE: CardType> {
     card: u32,
 }
 
-impl Card<{ CardType::Black }> {
-    pub fn fill(
-        self,
-        packs: &Packs,
-        mut white: impl Iterator<Item = Option<Card<{ CardType::White }>>>,
-    ) -> String {
-        let prompt = escape_string(&packs[self].to_string().replace("\\n", "\n "));
-
-        let mut prompt_slice = prompt.as_str();
-        let mut filled = String::with_capacity(prompt.len());
-
-        while let Some(pos) = prompt_slice.find('_') {
-            match white.next() {
-                Some(Some(c)) => {
-                    filled.push_str(&prompt_slice[..pos - 1]);
-
-                    // TODO: recursive
-                    filled.push_str(format!("``{}``", packs[c]).as_str());
-                }
-                _ => {
-                    filled.push_str(&prompt_slice[..pos + 1]);
-                }
-            }
-            prompt_slice = &prompt_slice[pos + 1..];
-        }
-        filled.push_str(prompt_slice);
-
-        let extra_cards = packs[self].extra_blanks();
-        for _ in 0..extra_cards {
-            if let Some(Some(c)) = white.next() {
-                // TODO: recursive
-                filled.push_str(format!(" ``{}``", packs[c]).as_str());
-            }
-        }
-
-        filled
-    }
+impl<const C: CardType> Card<C> {
     pub fn is_filled(
         self,
         packs: &Packs,
         white: impl Iterator<Item = Option<Card<{ CardType::White }>>>,
     ) -> bool {
-        let mut blanks = packs[self].blanks();
+        let mut blanks = match C {
+            CardType::White => packs[self].blanks_white(),
+            CardType::Black => packs[self].blanks_black(),
+        };
         let mut cards = 0;
 
         for card in white {
             match card {
                 Some(card) => {
                     // NOTE: this already accounts for recursiveness
-                    blanks += packs[card].blanks();
+                    blanks += packs[card].blanks_white();
                     cards += 1;
                 }
                 None => return false,
@@ -137,24 +110,82 @@ impl Card<{ CardType::Black }> {
 
         cards == blanks
     }
+    pub fn fill(
+        self,
+        packs: &Packs,
+        white: &mut impl Iterator<Item = Option<Card<{ CardType::White }>>>,
+    ) -> String {
+        let prompt: String = packs[self].to_string().into();
+        let prompt = match C {
+            CardType::White => prompt.trim_end_matches('.').into(),
+            CardType::Black => escape_string(&prompt.replace("\\n", "\n ")),
+        };
+
+        let mut prompt_slice = prompt.as_str();
+        let mut filled = String::with_capacity(prompt.len());
+
+        while let Some(pos) = prompt_slice.find('_') {
+            match white.next() {
+                Some(Some(c)) => {
+                    match C {
+                        CardType::White => {
+                            // trim spaces around blank
+                            filled.push_str(prompt_slice[..pos].trim_end());
+                            prompt_slice = prompt_slice[pos + 1..].trim_start();
+
+                            filled.push_str(format!("`` ``{}`` ``", c.fill(packs, white)).as_str());
+                        }
+                        CardType::Black => {
+                            // also remove backslash
+                            filled.push_str(&prompt_slice[..pos - 1]);
+                            prompt_slice = &prompt_slice[pos + 1..];
+
+                            filled.push_str(format!("``{}``", c.fill(packs, white)).as_str());
+                        }
+                    }
+                }
+                _ => {
+                    filled.push_str(&prompt_slice[..pos + 1]);
+                    prompt_slice = &prompt_slice[pos + 1..];
+                }
+            }
+        }
+        filled.push_str(prompt_slice);
+
+        match C {
+            CardType::White => {
+                // remove empty quotes
+                filled = filled
+                    .trim_start_matches(&[' ', '`'])
+                    .trim_end_matches(&[' ', '`'])
+                    .into();
+            }
+            CardType::Black => {
+                let extra_cards = packs[self].extra_blanks();
+                for _ in 0..extra_cards {
+                    if let Some(Some(c)) = white.next() {
+                        filled.push_str(format!(" ``{}``", c.fill(packs, white)).as_str());
+                    }
+                }
+            }
+        }
+
+        println!("{}", filled);
+        filled
+    }
 }
 
 pub type Pack = Arc<(String, PackData)>;
 pub struct Packs(Vec<Pack>);
 
-impl Index<Card<{ CardType::Black }>> for Packs {
+impl<const C: CardType> Index<Card<C>> for Packs {
     type Output = CardData;
 
-    fn index(&self, index: Card<{ CardType::Black }>) -> &Self::Output {
-        &self.0[index.pack as usize].1.black[index.card as usize]
-    }
-}
-
-impl Index<Card<{ CardType::White }>> for Packs {
-    type Output = CardData;
-
-    fn index(&self, index: Card<{ CardType::White }>) -> &Self::Output {
-        &self.0[index.pack as usize].1.white[index.card as usize]
+    fn index(&self, index: Card<C>) -> &Self::Output {
+        match C {
+            CardType::White => &self.0[index.pack as usize].1.white[index.card as usize],
+            CardType::Black => &self.0[index.pack as usize].1.black[index.card as usize],
+        }
     }
 }
 
@@ -355,7 +386,7 @@ impl Game for CAH {
                 }
 
                 let players: Vec<_> = s.players().collect();
-                let packs = Packs(
+                let mut packs = Packs(
                     s.packs
                         .0
                         .iter()
@@ -388,7 +419,7 @@ impl Game for CAH {
 
                 let mut players = players.into_iter().map(Player::new).collect::<Vec<_>>();
 
-                let prompt = match s.packs.draw_black() {
+                let prompt = match packs.draw_black() {
                     Some(c) => c,
                     None => {
                         return ActionResponse::Error(GameMessage::new(
@@ -402,7 +433,7 @@ impl Game for CAH {
                 };
 
                 for player in players.iter_mut() {
-                    if !player.draw(&mut s.packs, s.cards as usize, prompt) {
+                    if !player.draw(&mut packs, s.cards as usize, prompt) {
                         return ActionResponse::Error(GameMessage::new(
                             vec![Field::new(
                                 "Error",
@@ -533,6 +564,26 @@ impl Game for CAH {
                 Arc::new((
                     "EPPgroep.".into(),
                     serde_json::from_str(read_to_string("cards/eppgroep.json").unwrap().as_str())
+                        .unwrap(),
+                )),
+                Arc::new((
+                    "Modifiers".into(),
+                    serde_json::from_str(read_to_string("cards/modifiers.json").unwrap().as_str())
+                        .unwrap(),
+                )),
+                Arc::new((
+                    "Modifiers".into(),
+                    serde_json::from_str(read_to_string("cards/modifiers.json").unwrap().as_str())
+                        .unwrap(),
+                )),
+                Arc::new((
+                    "Modifiers".into(),
+                    serde_json::from_str(read_to_string("cards/modifiers.json").unwrap().as_str())
+                        .unwrap(),
+                )),
+                Arc::new((
+                    "Modifiers".into(),
+                    serde_json::from_str(read_to_string("cards/modifiers.json").unwrap().as_str())
                         .unwrap(),
                 )),
             ]),
