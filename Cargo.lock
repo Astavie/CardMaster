@@ -104,7 +104,6 @@ name = "cardmaster"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "derive_setters",
  "discord",
  "dotenv",
  "futures-util",

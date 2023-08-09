@@ -19,10 +19,18 @@ impl Ingame {
     }
     pub fn create_read(&mut self, msg: &mut GameMessage, event: &Event) -> Option<Action> {
         if let PlayerKind::User(user) = self.czar {
-            if let Some(i) = event
-                .custom_id_number("#", user)
-                .filter(|&i| i < self.players.len() - 1)
-            {
+            if let Some(i) = event.matches(|i| {
+                if i.user.id != user {
+                    None
+                } else {
+                    let s = i.data.custom_id.strip_prefix('#')?;
+                    let c = s.chars().next()?;
+                    B64_TABLE
+                        .iter()
+                        .position(|&p| p == c)
+                        .filter(|&i| i < self.players.len() - 1)
+                }
+            }) {
                 return self.create_winner(msg, i);
             }
         }

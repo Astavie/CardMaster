@@ -59,7 +59,6 @@ impl Ingame {
                 if self.czar != PlayerKind::User(user) {
                     changed = msg.create_select_grid(
                         event,
-                        user,
                         self.cards,
                         &mut player.selected,
                         |selected| {

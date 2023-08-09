@@ -21,24 +21,11 @@ impl<'a> Event<'a> {
         }
     }
 
-    pub fn custom_id(&self) -> Option<&str> {
-        Some(&self.interaction?.data.custom_id)
-    }
-    pub fn custom_id_number(&self, prefix: &str, user: Snowflake<User>) -> Option<usize> {
-        if self.interaction?.user.id != user {
-            return None;
-        }
-
-        let id = &self.interaction?.data.custom_id;
-        let s = id.strip_prefix(prefix)?;
-        let c = s.chars().next()?;
-        B64_TABLE.iter().position(|&p| p == c)
-    }
-    pub fn values(&self, id: &str) -> Option<&Vec<String>> {
-        match self.interaction {
-            Some(i) if i.data.custom_id == id => Some(&i.data.values),
-            _ => None,
-        }
+    pub fn matches<T>(
+        &self,
+        f: impl FnOnce(&'a Interaction<MessageComponent>) -> Option<T>,
+    ) -> Option<T> {
+        f(self.interaction?)
     }
 
     pub fn button(
@@ -83,7 +70,13 @@ impl GameMessage {
         selected: &mut Vec<usize>,
     ) {
         // get selected values
-        let changed = match event.values(&name) {
+        let changed = match event.matches(|i| {
+            if i.data.custom_id == name {
+                Some(&i.data.values)
+            } else {
+                None
+            }
+        }) {
             Some(v) => {
                 *selected = v
                     .iter()
@@ -134,7 +127,7 @@ impl GameMessage {
         max: i32,
     ) {
         // get value
-        match event.custom_id().and_then(|s| s.strip_prefix(&name)) {
+        match event.matches(|i| i.data.custom_id.strip_prefix(&name)) {
             Some("__min") => *val = val.saturating_sub(1).max(min),
             Some("__max") => *val = val.saturating_add(1).min(max),
             _ => (),
@@ -199,7 +192,6 @@ impl GameMessage {
     pub fn create_select_grid(
         &mut self,
         event: &Event,
-        user: Snowflake<User>,
         count: usize,
         selected: &mut Vec<Option<usize>>,
         done: impl FnOnce(&Vec<Option<usize>>) -> bool,
@@ -207,9 +199,19 @@ impl GameMessage {
         // TODO: scrolling if too big
 
         let mut changed = false;
+
+        // for some reason rust-analyzer thinks this is unused
+        #[allow(unused_assignments)]
         let mut is_done = false;
 
-        if let Some(i) = event.custom_id_number("#", user).filter(|&i| i < count) {
+        if let Some(i) = event.matches(|i| {
+            let s = i.data.custom_id.strip_prefix('#')?;
+            let c = s.chars().next()?;
+            B64_TABLE
+                .iter()
+                .position(|&p| p == c)
+                .filter(|&i| i < count)
+        }) {
             if selected.contains(&Some(i)) {
                 // we are not done anymore
                 changed = done(selected);
