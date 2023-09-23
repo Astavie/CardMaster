@@ -117,7 +117,7 @@ pub fn derive_partial(input: proc_macro::TokenStream) -> proc_macro::TokenStream
                 *self = ::core::convert::Into::into(full);
                 crate::request::Result::Ok(())
             }
-            #vis async fn get_field<T>(&mut self, client: &crate::request::Bot, f: fn(&Self) -> &::core::option::Option<T>) -> crate::request::Result<&T> {
+            #vis async fn get_field<'a, T: 'a>(&'a mut self, client: &crate::request::Bot, f: fn(&Self) -> &::core::option::Option<T>) -> crate::request::Result<&'a T> {
                 crate::request::Result::Ok(match f(self) {
                     ::core::option::Option::Some(_) => {
                         f(self).as_ref().unwrap()
