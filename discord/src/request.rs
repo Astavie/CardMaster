@@ -5,7 +5,7 @@ use isahc::{
     http::{Method, StatusCode},
     AsyncReadResponseExt,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, ser::SerializeSeq, Deserialize, Serialize};
 use tokio::{sync::Mutex, time::Instant};
 
 #[async_trait]
@@ -29,6 +29,7 @@ where
     pub method: Method,
     pub uri: String,
     pub body: Option<String>,
+    pub files: Vec<Arc<File>>,
 }
 
 #[async_trait]
@@ -41,12 +42,12 @@ where
 
     async fn request_weak(self, client: &C) -> Result<T> {
         client
-            .request_weak(self.method, &self.uri, self.body.as_deref())
+            .request_weak(self.method, &self.uri, self.body.as_deref(), &self.files)
             .await
     }
     async fn request(self, client: &C) -> Result<T> {
         client
-            .request(self.method, &self.uri, self.body.as_deref())
+            .request(self.method, &self.uri, self.body.as_deref(), &self.files)
             .await
     }
 }
@@ -88,6 +89,7 @@ where
             method: Method::GET,
             uri: uri.into(),
             body: None,
+            files: Vec::new(),
         }
     }
 
@@ -100,6 +102,20 @@ where
             method: Method::POST,
             uri: uri.into(),
             body: Some(serde_json::to_string(body).unwrap()),
+            files: Vec::new(),
+        }
+    }
+
+    pub fn post_attached<S>(uri: S, body: &(impl Serialize + Attachments)) -> Self
+    where
+        S: Into<String>,
+    {
+        HttpRequest {
+            phantom: PhantomData,
+            method: Method::POST,
+            uri: uri.into(),
+            body: Some(serde_json::to_string(body).unwrap()),
+            files: body.attachments(),
         }
     }
 
@@ -112,6 +128,20 @@ where
             method: Method::PATCH,
             uri: uri.into(),
             body: Some(serde_json::to_string(body).unwrap()),
+            files: Vec::new(),
+        }
+    }
+
+    pub fn patch_attached<S>(uri: S, body: &(impl Serialize + Attachments)) -> Self
+    where
+        S: Into<String>,
+    {
+        HttpRequest {
+            phantom: PhantomData,
+            method: Method::PATCH,
+            uri: uri.into(),
+            body: Some(serde_json::to_string(body).unwrap()),
+            files: body.attachments(),
         }
     }
 
@@ -124,6 +154,7 @@ where
             method: Method::DELETE,
             uri: uri.into(),
             body: None,
+            files: Vec::new(),
         }
     }
 }
@@ -166,6 +197,92 @@ impl DiscordRateLimits {
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[derive(Debug)]
+pub struct Indexed<T>(pub Vec<T>);
+
+#[derive(Debug)]
+pub struct IndexedOr<T, E>(pub Vec<T>, pub Vec<E>);
+
+impl<T> Indexed<T> {
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.0.iter()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<T> From<Vec<T>> for Indexed<T> {
+    fn from(value: Vec<T>) -> Self {
+        Self(value)
+    }
+}
+
+impl<T> Default for Indexed<T> {
+    fn default() -> Self {
+        Self(Vec::default())
+    }
+}
+
+impl<T, E> Default for IndexedOr<T, E> {
+    fn default() -> Self {
+        Self(Vec::default(), Vec::default())
+    }
+}
+
+#[derive(Serialize)]
+struct WithIndex<'a, T> {
+    id: usize,
+    #[serde(flatten)]
+    elem: &'a T,
+}
+
+impl<T, E> Serialize for IndexedOr<T, E>
+where
+    T: Serialize,
+    E: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.0.len() + self.1.len()))?;
+        for (id, elem) in self.0.iter().enumerate() {
+            seq.serialize_element(&WithIndex { id, elem })?;
+        }
+        for elem in self.1.iter() {
+            seq.serialize_element(&elem)?;
+        }
+        seq.end()
+    }
+}
+
+impl<T> Serialize for Indexed<T>
+where
+    T: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for (id, elem) in self.0.iter().enumerate() {
+            seq.serialize_element(&WithIndex { id, elem })?;
+        }
+        seq.end()
+    }
+}
+
+pub trait Attachments {
+    fn attachments(&self) -> Vec<Arc<File>>;
+}
+
+pub struct File {
+    pub name: String,
+    pub typ: String,
+    pub data: Box<[u8]>,
+}
+
 #[async_trait]
 pub trait Client: Sync {
     async fn request_weak<T: DeserializeOwned>(
@@ -173,6 +290,7 @@ pub trait Client: Sync {
         method: Method,
         uri: &str,
         body: Option<&str>,
+        files: &[Arc<File>],
     ) -> Result<T>;
 
     async fn request<T: DeserializeOwned>(
@@ -180,9 +298,10 @@ pub trait Client: Sync {
         method: Method,
         uri: &str,
         body: Option<&str>,
+        files: &[Arc<File>],
     ) -> Result<T> {
         loop {
-            match self.request_weak(method.clone(), uri, body).await {
+            match self.request_weak(method.clone(), uri, body, files).await {
                 Err(RequestError::RateLimited) => (),
                 Err(RequestError::Network) => (),
                 r => break r,
@@ -226,6 +345,53 @@ impl Bot {
     }
 }
 
+pub async fn create_response(
+    http: isahc::http::request::Builder,
+    body: Option<&str>,
+    files: &[Arc<File>],
+) -> std::result::Result<isahc::Response<isahc::AsyncBody>, isahc::Error> {
+    if files.len() > 0 {
+        let mut bytes = Vec::new();
+
+        if let Some(body) = body {
+            bytes.extend_from_slice(
+                "--boundary\nContent-Disposition: form-data; name=\"payload_json\"\nContent-Type: application/json\n\n"
+                .as_bytes(),
+            );
+            bytes.extend_from_slice(body.as_bytes());
+            bytes.extend_from_slice("\n".as_bytes());
+        }
+
+        for (i, file) in files.iter().enumerate() {
+            bytes.extend_from_slice(format!(
+                "--boundary\nContent-Disposition: form-data; name=\"files[{}]\"; filename=\"{}\"\nContent-Type: {}\n\n", 
+                i,
+                file.name,
+                file.typ,
+            ).as_bytes());
+            bytes.extend_from_slice(&file.data);
+            bytes.extend_from_slice("\n".as_bytes());
+        }
+        bytes.extend_from_slice("--boundary--\n".as_bytes());
+
+        let request = http
+            .header("Content-Type", "multipart/form-data; boundary=boundary")
+            .body(bytes)
+            .unwrap();
+        isahc::send_async(request)
+    } else if let Some(body) = body {
+        let request = http
+            .header("Content-Type", "application/json")
+            .body(body)
+            .unwrap();
+        // println!("{}", request.body());
+        isahc::send_async(request)
+    } else {
+        let request = http.body(()).unwrap();
+        isahc::send_async(request)
+    }.await
+}
+
 #[async_trait]
 impl Client for Bot {
     async fn request_weak<T: DeserializeOwned>(
@@ -233,6 +399,7 @@ impl Client for Bot {
         method: Method,
         uri: &str,
         body: Option<&str>,
+        files: &[Arc<File>],
     ) -> Result<T> {
         let bucket = Bot::get_bucket(uri);
 
@@ -281,19 +448,7 @@ impl Client for Bot {
             )
             .header("Authorization", format!("Bot {}", self.token));
 
-        let mut response = if let Some(body) = body {
-            let request = http
-                .header("Content-Type", "application/json")
-                .body(body.clone())
-                .unwrap();
-            println!("{}", request.body());
-            isahc::send_async(request)
-        } else {
-            let request = http.body(()).unwrap();
-            isahc::send_async(request)
-        }
-        .await
-        .map_err(|err| {
+        let mut response = create_response(http, body, files).await.map_err(|err| {
             if err.is_client() || err.is_server() || err.is_tls() {
                 RequestError::Authorization
             } else {
@@ -344,7 +499,7 @@ impl Client for Bot {
         }
 
         let string = response.text().await.unwrap();
-        println!("{}", string);
+        // println!("{}", string);
 
         if response.status().is_client_error() {
             return Err(RequestError::ClientError(response.status()));

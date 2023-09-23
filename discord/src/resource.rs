@@ -72,6 +72,14 @@ impl<T> TryFrom<String> for Snowflake<T> {
     }
 }
 
+impl<T> TryFrom<&str> for Snowflake<T> {
+    type Error = ParseIntError;
+
+    fn try_from(value: &str) -> ::std::result::Result<Self, Self::Error> {
+        Ok(Snowflake::new(value.parse()?))
+    }
+}
+
 impl<T> fmt::Debug for Snowflake<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("<{}> {}", type_name::<T>(), self.id))

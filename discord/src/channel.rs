@@ -16,6 +16,7 @@ use super::{
 #[derive(Debug, Deserialize)]
 pub struct Channel {
     pub id: Snowflake<Channel>,
+    pub name: Option<String>,
 }
 
 impl Display for Snowflake<Channel> {
@@ -39,7 +40,7 @@ pub trait ChannelResource {
     }
     #[resource(Message)]
     fn send_message(&self, data: CreateMessage) -> HttpRequest<Message> {
-        HttpRequest::post(format!("{}/messages", self.endpoint().uri()), &data)
+        HttpRequest::post_attached(format!("{}/messages", self.endpoint().uri()), &data)
     }
 }
 

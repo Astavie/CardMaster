@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, sync::Arc};
 
 use async_trait::async_trait;
 use derive_setters::Setters;
@@ -11,7 +11,8 @@ use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use crate::{
-    request::{Client, Request, RequestError},
+    message::{CreateAttachment, PartialAttachment},
+    request::{create_response, Attachments, Client, File, IndexedOr, Request, RequestError},
     resource::{resource, Endpoint},
 };
 
@@ -102,6 +103,13 @@ pub struct CreateUpdate {
     // send these even if empty, so they can also be removed
     embeds: Vec<Embed>,
     components: Vec<ActionRow>,
+    attachments: IndexedOr<CreateAttachment, PartialAttachment>,
+}
+
+impl Attachments for CreateUpdate {
+    fn attachments(&self) -> Vec<Arc<File>> {
+        self.attachments.0.iter().map(|a| a.file.clone()).collect()
+    }
 }
 
 #[derive(EnumSetType)]
@@ -117,6 +125,15 @@ struct Response<T> {
     data: T,
 }
 
+impl<T> Attachments for Response<T>
+where
+    T: Attachments,
+{
+    fn attachments(&self) -> Vec<Arc<File>> {
+        self.data.attachments()
+    }
+}
+
 pub struct Webhook;
 
 #[async_trait]
@@ -126,25 +143,14 @@ impl Client for Webhook {
         method: Method,
         uri: &str,
         body: Option<&str>,
+        files: &[Arc<File>],
     ) -> Result<T> {
         // send request
         let http = isahc::Request::builder()
             .method(method)
             .uri(format!("https://discord.com/api/v10{}", uri));
 
-        let mut response = if let Some(body) = body {
-            let request = http
-                .header("Content-Type", "application/json")
-                .body(body.clone())
-                .unwrap();
-            // println!("{}", request.body());
-            isahc::send_async(request)
-        } else {
-            let request = http.body(()).unwrap();
-            isahc::send_async(request)
-        }
-        .await
-        .map_err(|err| {
+        let mut response = create_response(http, body, files).await.map_err(|err| {
             if err.is_client() || err.is_server() || err.is_tls() {
                 RequestError::Authorization
             } else {
@@ -258,7 +264,7 @@ pub trait ComponentInteractionResource: InteractionResource<Data = MessageCompon
         let str = token.token.clone();
 
         ResponseRequest(
-            HttpRequest::post(token.uri_response(), &Response { typ: 7, data }),
+            HttpRequest::post_attached(token.uri_response(), &Response { typ: 7, data }),
             InteractionResponseIdentifier {
                 application_id,
                 token: str,

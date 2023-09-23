@@ -107,6 +107,7 @@ impl GatewayState {
                                 self.heartbeat_timeout = None;
                             }
                             GatewayOpcode::Reconnect => {
+                                println!("OOP gateway closed");
                                 // TODO: try to resume
                                 return Err(());
                             }
@@ -286,6 +287,7 @@ impl Gateway {
     }
 
     pub async fn close(self) {
+        println!("closing gateway");
         self.tx_die.send(()).await.unwrap();
 
         let mut state = self.task.await.unwrap();

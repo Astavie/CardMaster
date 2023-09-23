@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use derive_setters::Setters;
 use monostate::{MustBe, MustBeU64};
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use crate::request::{Attachments, File, Indexed, IndexedOr};
 use crate::resource::{resource, Endpoint};
 
 use super::request::HttpRequest;
@@ -36,17 +39,70 @@ pub struct Message {
     pub embeds: Vec<Embed>,
     #[serde(default)]
     pub components: Vec<ActionRow>,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+}
+
+#[derive(Setters, Serialize)]
+#[setters(strip_option)]
+pub struct CreateAttachment {
+    #[serde(skip)]
+    #[setters(skip)]
+    pub file: Arc<File>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+}
+
+impl CreateAttachment {
+    pub fn new(file: File) -> Self {
+        Self {
+            file: Arc::new(file),
+            description: None,
+        }
+    }
 }
 
 #[derive(Default, Setters, Serialize)]
 #[setters(strip_option)]
 pub struct CreateMessage {
+    #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
 
     #[serde(skip_serializing_if = "Vec::is_empty")]
     embeds: Vec<Embed>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     components: Vec<ActionRow>,
+
+    #[serde(skip_serializing_if = "Indexed::is_empty")]
+    attachments: Indexed<CreateAttachment>,
+}
+
+impl Attachments for CreateMessage {
+    fn attachments(&self) -> Vec<Arc<File>> {
+        self.attachments.iter().map(|a| a.file.clone()).collect()
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Attachment {
+    pub id: Snowflake<Attachment>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct PartialAttachment {
+    pub id: Snowflake<Attachment>,
+}
+
+impl From<Attachment> for PartialAttachment {
+    fn from(value: Attachment) -> Self {
+        Self { id: value.id }
+    }
+}
+
+impl From<Snowflake<Attachment>> for PartialAttachment {
+    fn from(value: Snowflake<Attachment>) -> Self {
+        Self { id: value }
+    }
 }
 
 #[derive(Default, Setters, Serialize)]
@@ -54,10 +110,16 @@ pub struct CreateMessage {
 pub struct PatchMessage {
     content: Option<String>,
 
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    // send these even if empty, so they can also be removed
     embeds: Vec<Embed>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     components: Vec<ActionRow>,
+    attachments: IndexedOr<CreateAttachment, PartialAttachment>,
+}
+
+impl Attachments for PatchMessage {
+    fn attachments(&self) -> Vec<Arc<File>> {
+        self.attachments.0.iter().map(|a| a.file.clone()).collect()
+    }
 }
 
 #[derive(Debug, Default, Setters, Serialize, Deserialize)]
@@ -234,7 +296,7 @@ pub trait MessageResource: Sized {
     }
     #[resource(Message)]
     fn patch(&self, data: PatchMessage) -> HttpRequest<Message> {
-        HttpRequest::patch(self.endpoint().uri(), &data)
+        HttpRequest::patch_attached(self.endpoint().uri(), &data)
     }
     #[resource(())]
     fn delete(self) -> HttpRequest<()> {

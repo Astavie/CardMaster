@@ -1,6 +1,7 @@
 use partial_id::Partial;
 use serde::Deserialize;
 
+use crate::channel::Channel;
 use crate::request::HttpRequest;
 use crate::resource::resource;
 use crate::resource::Endpoint;
@@ -26,6 +27,10 @@ pub trait GuildResource {
     #[resource(Guild)]
     fn get(&self) -> HttpRequest<Guild> {
         HttpRequest::get(self.endpoint().uri())
+    }
+    #[resource(Vec<Channel>)]
+    fn get_channels(&self) -> HttpRequest<Vec<Channel>> {
+        HttpRequest::get(format!("{}/channels", self.endpoint().uri()))
     }
 }
 
