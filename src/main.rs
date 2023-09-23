@@ -10,7 +10,6 @@ use discord::interaction::{AnyInteraction, CreateReply, InteractionResource, Web
 use discord::request::Bot;
 use discord::user;
 use dotenv::dotenv;
-use futures_util::StreamExt;
 use game::{Game, InteractionDispatcher};
 
 use discord::application::{self, ApplicationResource};

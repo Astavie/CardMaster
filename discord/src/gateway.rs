@@ -1,8 +1,12 @@
-use std::{pin::Pin, task::Poll, time::Duration};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use futures_util::{
     future::{pending, Either},
-    SinkExt, Stream, StreamExt,
+    Future, SinkExt, Stream, StreamExt,
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -16,7 +20,9 @@ use tokio::{
     time::{interval_at, sleep_until, Instant, Interval},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    connect_async, tungstenite::Error, tungstenite::Message, MaybeTlsStream, WebSocketStream,
+};
 
 use crate::request::Request;
 
@@ -32,12 +38,11 @@ struct GatewayState {
 
     ready: Option<Ready>,
     sequence: Option<u32>,
+    token: String,
 }
 
-type Result = std::result::Result<(), ()>;
-
 impl GatewayState {
-    async fn heartbeat(&mut self) -> Result {
+    async fn heartbeat(&mut self) -> std::result::Result<(), Error> {
         let message = serde_json::to_string(&GatewayMessage {
             op: GatewayOpcode::Heartbeat,
             d: self.sequence,
@@ -46,89 +51,128 @@ impl GatewayState {
         })
         .unwrap();
 
-        if self.ws_stream.send(Message::text(message)).await.is_err() {
-            Err(())
-        } else {
-            self.heartbeat_timeout = Some(Instant::now() + Duration::from_secs(2));
-            Ok(())
-        }
+        self.ws_stream.send(Message::text(message)).await?;
+        self.heartbeat_timeout = Some(Instant::now() + Duration::from_secs(2));
+        Ok(())
     }
-    async fn iteration(&mut self) -> Result {
-        let timeout = match self.heartbeat_timeout {
-            Some(deadline) => Either::Left(sleep_until(deadline)),
-            None => Either::Right(pending()),
-        };
-        select! {
-            _ = self.rx_die.next() => {
-                // manual close
-                return Err(());
-            }
-            _ = timeout => {
-                // lost connection
-                return Err(());
-            }
-            _ = self.interval.tick() => {
-                // heartbeat!
-                self.heartbeat().await?;
-            }
-            item = self.ws_stream.next() => {
-                let Some(Ok(item)) = item else {
-                    // end of stream
-                    return Err(());
-                };
-                match item {
-                    Message::Text(s) => {
-                        let message: GatewayMessage<Value> = serde_json::from_str(&s).unwrap();
-                        match message.op {
-                            GatewayOpcode::Dispatch => {
-                                // event happened
-                                self.sequence = message.s;
-                                let event: std::result::Result<GatewayEvent, _> = serde_json::from_str(&s);
-                                match event {
-                                    Ok(GatewayEvent::Ready(ready)) => {
-                                        self.ready = Some(ready);
-                                    }
-                                    Ok(event) => {
-                                        if self.sender.send(event).await.is_err() {
-                                            return Err(());
-                                        }
-                                    }
-                                    _ => (),
-                                }
-                            }
-                            GatewayOpcode::Heartbeat => {
-                                // heartbeat!
-                                self.heartbeat().await?;
-                            }
-                            GatewayOpcode::InvalidSession => {
-                                return Err(());
-                            }
-                            GatewayOpcode::HeartbeatACK => {
-                                self.heartbeat_timeout = None;
-                            }
-                            GatewayOpcode::Reconnect => {
-                                println!("OOP gateway closed");
-                                // TODO: try to resume
-                                return Err(());
-                            }
-                            _ => {}
-                        }
+    async fn run(&mut self) {
+        loop {
+            let timeout = match self.heartbeat_timeout {
+                Some(deadline) => Either::Left(sleep_until(deadline)),
+                None => Either::Right(pending()),
+            };
+            select! {
+                _ = self.rx_die.next() => {
+                    // manual close
+                    break;
+                }
+                _ = timeout => {
+                    // lost connection
+                    break;
+                }
+                _ = self.interval.tick() => {
+                    // heartbeat!
+                    if self.heartbeat().await.is_err() {
+                        break;
                     }
-                    Message::Close(_) => {
+                }
+                item = self.ws_stream.next() => {
+                    let Some(Ok(item)) = item else {
                         // end of stream
-                        return Err(());
+                        break;
+                    };
+                    match item {
+                        Message::Text(s) => {
+                            let message: GatewayMessage<Value> = serde_json::from_str(&s).unwrap();
+                            match message.op {
+                                GatewayOpcode::Dispatch => {
+                                    // event happened
+                                    self.sequence = message.s;
+                                    let event: std::result::Result<GatewayEvent, _> = serde_json::from_str(&s);
+                                    match event {
+                                        Ok(GatewayEvent::Ready(ready)) => {
+                                            self.ready = Some(ready);
+                                        }
+                                        Ok(event) => {
+                                            if self.sender.send(event).await.is_err() {
+                                                // receiver is gone
+                                                break;
+                                            }
+                                        }
+                                        _ => (),
+                                    }
+                                }
+                                GatewayOpcode::Heartbeat => {
+                                    // heartbeat!
+                                    if self.heartbeat().await.is_err() {
+                                        break;
+                                    }
+                                }
+                                GatewayOpcode::InvalidSession => {
+                                    println!("OOP invalid session");
+                                    break;
+                                }
+                                GatewayOpcode::HeartbeatACK => {
+                                    self.heartbeat_timeout = None;
+                                }
+                                GatewayOpcode::Reconnect => {
+                                    // resume stream
+                                    let (Some(ready), Some(sequence)) = (&self.ready, self.sequence) else {
+                                        // we have no resume information
+                                        break;
+                                    };
+
+                                    let full_url = format!("{}/?v=10&encoding=json", ready.resume_gateway_url);
+
+                                    self.ws_stream.close(None).await.expect("old websocket stream could not close");
+                                    (self.ws_stream, _) = connect_async(full_url).await.expect("could not connect");
+
+                                    let resume = serde_json::to_string(&GatewayMessage {
+                                        op: GatewayOpcode::Resume,
+                                        d: Resume {
+                                            token: &self.token,
+                                            session_id: &ready.session_id,
+                                            seq: sequence,
+                                        },
+                                        s: None,
+                                        t: None,
+                                    })
+                                    .unwrap();
+
+                                    if self.ws_stream.send(Message::Text(resume)).await.is_err() {
+                                        // could not send resume
+                                        break;
+                                    }
+                                }
+                                GatewayOpcode::Hello => {
+                                    // set heartbeat interval
+                                    let hello: std::result::Result<Hello, _> = serde_json::from_value(message.d);
+                                    if let Ok(hello) = hello {
+                                        let heartbeat_interval = hello.heartbeat_interval;
+                                        let offset = rand::thread_rng().gen_range(0..heartbeat_interval);
+                                        let start = Instant::now() + Duration::from_millis(offset);
+                                        self.interval = interval_at(start, Duration::from_millis(heartbeat_interval));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        Message::Close(_) => {
+                            // end of stream
+                            break;
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
-        Ok(())
+        // TODO: reconnect?
     }
 }
 
 pub struct Gateway {
     stream: ReceiverStream<GatewayEvent>,
-    task: JoinHandle<GatewayState>,
+    task: JoinHandle<()>,
     tx_die: Sender<()>,
 }
 
@@ -173,48 +217,49 @@ struct Hello {
 }
 
 #[derive(Serialize, Debug)]
-struct Identify {
-    token: String,
+struct Identify<'a> {
+    token: &'a str,
     intents: u32,
     properties: ConnectionProperties,
 }
 
 #[derive(Serialize, Debug)]
 struct ConnectionProperties {
-    os: String,
-    browser: String,
-    device: String,
+    os: &'static str,
+    browser: &'static str,
+    device: &'static str,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Ready {
-    _resume_gateway_url: String,
-    _session_id: String,
+    resume_gateway_url: String,
+    session_id: String,
 }
 
 #[derive(Serialize, Debug)]
-struct Resume {
-    token: String,
-    session_id: String,
+struct Resume<'a> {
+    token: &'a str,
+    session_id: &'a str,
     seq: u32,
 }
+
+const NAME: &str = env!("CARGO_PKG_NAME");
 
 impl Stream for Gateway {
     type Item = GatewayEvent;
 
-    fn poll_next(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        if self.task.is_finished() {
-            Poll::Ready(None)
-        } else {
-            self.stream.poll_next_unpin(cx)
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Poll::Ready(_) = Pin::new(&mut self.task).poll(cx) {
+            return Poll::Ready(None);
         }
+
+        if let Poll::Ready(event) = Pin::new(&mut self.stream.next()).poll(cx) {
+            return Poll::Ready(event);
+        }
+
+        Poll::Pending
     }
 }
-
-const NAME: &str = env!("CARGO_PKG_NAME");
 
 impl Gateway {
     pub async fn connect(client: &Bot) -> request::Result<Self> {
@@ -240,12 +285,12 @@ impl Gateway {
         let identify = serde_json::to_string(&GatewayMessage {
             op: GatewayOpcode::Identify,
             d: Identify {
-                token: client.token().into(),
+                token: client.token(),
                 intents: 0,
                 properties: ConnectionProperties {
-                    os: "linux".into(),
-                    browser: NAME.into(),
-                    device: NAME.into(),
+                    os: "linux",
+                    browser: NAME,
+                    device: NAME,
                 },
             },
             s: None,
@@ -272,12 +317,10 @@ impl Gateway {
             rx_die: ReceiverStream::new(rx_die),
             sender: tx_event,
             ready: None,
+            token: client.token().into(),
         };
 
-        let task = tokio::spawn(async move {
-            while state.iteration().await.is_ok() {}
-            state
-        });
+        let task = tokio::spawn(async move { state.run().await });
 
         Ok(Gateway {
             task,
@@ -286,11 +329,16 @@ impl Gateway {
         })
     }
 
+    pub async fn next(&mut self) -> Option<GatewayEvent> {
+        StreamExt::next(self).await
+    }
+
     pub async fn close(self) {
         println!("closing gateway");
-        self.tx_die.send(()).await.unwrap();
 
-        let mut state = self.task.await.unwrap();
-        state.ws_stream.close(None).await.unwrap();
+        if !self.task.is_finished() {
+            let _ = self.tx_die.send(()).await;
+            let _ = self.task.await;
+        }
     }
 }

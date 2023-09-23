@@ -25,4 +25,4 @@ partial_id = { path = "partial_id" }
 resource = { path = "resource" }
 
 [patch.crates-io]
-serde = { git = "https://github.com/Astavie/serde.git", branch = "integer-tags-for-enums-noprecompile" }
+serde = { git = "https://github.com/Astavie/serde.git", branch = "integer-tags-for-enums" }
