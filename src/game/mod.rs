@@ -6,9 +6,9 @@ use futures_util::future::join_all;
 use discord::{
     channel::ChannelResource,
     interaction::{
-        ApplicationCommand, ComponentInteractionResource, CreateReply, CreateUpdate, Interaction,
-        InteractionResource, InteractionResponseIdentifier, InteractionToken, MessageComponent,
-        ReplyFlag, Webhook,
+        ApplicationCommand, CreateReply, CreateUpdate, InteractionResource,
+        InteractionResponseIdentifier, InteractionToken, MessageComponent, MessageInteraction,
+        MessageInteractionResource, ReplyFlag, Webhook,
     },
     message::{
         ActionRow, Author, CreateMessage, Embed, Field, Message, MessageResource, PatchMessage,
@@ -42,8 +42,8 @@ impl InteractionDispatcher {
     pub fn new() -> Self {
         InteractionDispatcher { games: Vec::new() }
     }
-    pub async fn dispatch(&mut self, i: Interaction<MessageComponent>) {
-        let msg = i.data.message.id.snowflake();
+    pub async fn dispatch(&mut self, i: MessageInteraction<MessageComponent>) {
+        let msg = i.message.id.snowflake();
 
         let pos = match self
             .games
@@ -139,7 +139,7 @@ impl GameUI {
     }
     pub async fn reply_panel<P: Into<&'static str>>(
         &mut self,
-        i: Interaction<MessageComponent>,
+        i: MessageInteraction<MessageComponent>,
         msg: GameMessage,
         panel: P,
     ) {
@@ -159,7 +159,7 @@ impl GameUI {
         let id = response.get(&Webhook).await.unwrap().id.snowflake();
         self.replies.insert(id, (panel.into(), response));
     }
-    pub async fn reply(&mut self, i: Interaction<MessageComponent>, msg: GameMessage) {
+    pub async fn reply(&mut self, i: MessageInteraction<MessageComponent>, msg: GameMessage) {
         // we do not sign replies
         i.reply(
             &Webhook,
@@ -171,8 +171,8 @@ impl GameUI {
         .await
         .unwrap();
     }
-    pub async fn update(&mut self, i: Interaction<MessageComponent>, msg: GameMessage) {
-        if i.data.message.id.snowflake() == self.msg_id {
+    pub async fn update(&mut self, i: MessageInteraction<MessageComponent>, msg: GameMessage) {
+        if i.message.id.snowflake() == self.msg_id {
             // sign if we are updating the base message
             self.msg = Some(
                 i.update(
@@ -205,7 +205,7 @@ impl GameUI {
 
 #[async_trait]
 trait Logic {
-    async fn logic(&mut self, ui: &mut GameUI, i: Interaction<MessageComponent>) -> bool;
+    async fn logic(&mut self, ui: &mut GameUI, i: MessageInteraction<MessageComponent>) -> bool;
 }
 
 #[async_trait]
@@ -213,13 +213,17 @@ impl<T> Logic for T
 where
     T: Game + Send,
 {
-    async fn logic(&mut self, ui: &mut GameUI, interaction: Interaction<MessageComponent>) -> bool {
+    async fn logic(
+        &mut self,
+        ui: &mut GameUI,
+        interaction: MessageInteraction<MessageComponent>,
+    ) -> bool {
         let (panel, user_id) = {
-            if interaction.data.message.id.snowflake() == ui.msg_id {
+            if interaction.message.id.snowflake() == ui.msg_id {
                 (ui.panel, ui.user)
             } else {
                 (
-                    ui.replies[&interaction.data.message.id.snowflake()].0,
+                    ui.replies[&interaction.message.id.snowflake()].0,
                     interaction.user.id,
                 )
             }
@@ -271,7 +275,7 @@ where
                         // update/edit main panel
                         let mut msg = GameMessage::default();
                         self.create_panel(&mut msg, &Event::none(), panel, ui.user);
-                        if interaction.data.message.id.snowflake() == ui.msg_id {
+                        if interaction.message.id.snowflake() == ui.msg_id {
                             ui.update(interaction, msg).await;
                         } else {
                             ui.edit(ui.msg_id, msg).await;

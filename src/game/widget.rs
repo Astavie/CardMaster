@@ -1,5 +1,5 @@
 use discord::{
-    interaction::{Interaction, MessageComponent},
+    interaction::{MessageComponent, MessageInteraction},
     message::{ActionRow, ActionRowComponent, Button, ButtonStyle, SelectOption, TextSelectMenu},
     resource::Snowflake,
     user::User,
@@ -8,14 +8,14 @@ use discord::{
 use super::{GameMessage, B64_TABLE};
 
 pub struct Event<'a> {
-    interaction: Option<&'a Interaction<MessageComponent>>,
+    interaction: Option<&'a MessageInteraction<MessageComponent>>,
 }
 
 impl<'a> Event<'a> {
     pub fn none() -> Self {
         Self { interaction: None }
     }
-    pub fn component(interaction: &'a Interaction<MessageComponent>) -> Self {
+    pub fn component(interaction: &'a MessageInteraction<MessageComponent>) -> Self {
         Self {
             interaction: Some(&interaction),
         }
@@ -23,7 +23,7 @@ impl<'a> Event<'a> {
 
     pub fn matches<T>(
         &self,
-        f: impl FnOnce(&'a Interaction<MessageComponent>) -> Option<T>,
+        f: impl FnOnce(&'a MessageInteraction<MessageComponent>) -> Option<T>,
     ) -> Option<T> {
         f(self.interaction?)
     }

@@ -63,6 +63,8 @@ async fn on_command(i: AnyInteraction, d: &mut InteractionDispatcher, client: &B
             _ => {}
         },
         AnyInteraction::Component(comp) => d.dispatch(comp).await,
+        AnyInteraction::Modal(submit) => {}
+        AnyInteraction::MessageModal(submit) => {}
     };
     Ok(())
 }
@@ -70,7 +72,7 @@ async fn on_command(i: AnyInteraction, d: &mut InteractionDispatcher, client: &B
 async fn run() -> Result<()> {
     // load dotenv
     dotenv().unwrap();
-    let token = env::var("CARDMASTER").expect("Bot token CARDMASTER must be set");
+    let token = env::var("TOKEN").expect("Bot token TOKEN must be set");
 
     // connect
     let client = Bot::new(token);

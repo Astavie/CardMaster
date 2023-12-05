@@ -7,8 +7,10 @@ use isahc::{
     http::{Method, StatusCode},
     AsyncReadResponseExt,
 };
+use monostate::MustBe;
 use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use serde_repr::Serialize_repr;
 
 use crate::{
     message::{CreateAttachment, PartialAttachment},
@@ -29,11 +31,26 @@ use super::{
 #[derive(Debug)]
 pub enum AnyInteraction {
     Command(Interaction<ApplicationCommand>),
-    Component(Interaction<MessageComponent>),
+    Component(MessageInteraction<MessageComponent>),
+
+    Modal(Interaction<ModalSubmit>),
+    MessageModal(MessageInteraction<ModalSubmit>),
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Interaction<T: 'static + DropToken> {
+pub struct MessageInteraction<T: 'static> {
+    pub data: T,
+
+    #[serde(flatten)]
+    pub token: MessageInteractionToken<T>,
+    pub user: User,
+
+    pub channel_id: Snowflake<Channel>,
+    pub message: Message,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Interaction<T: 'static> {
     pub data: T,
 
     #[serde(flatten)]
@@ -44,40 +61,37 @@ pub struct Interaction<T: 'static + DropToken> {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct InteractionToken<T: 'static + DropToken> {
+pub struct MessageInteractionToken<T: 'static> {
+    id: Snowflake<MessageInteraction<T>>,
+    token: String,
+    application_id: Snowflake<Application>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InteractionToken<T: 'static> {
     id: Snowflake<Interaction<T>>,
     token: String,
     application_id: Snowflake<Application>,
 }
 
-impl<T: 'static + DropToken> Drop for InteractionToken<T> {
+impl<T: 'static> Drop for MessageInteractionToken<T> {
     fn drop(&mut self) {
-        T::drop(self);
-    }
-}
-
-pub trait DropToken: Sized {
-    fn drop(t: &mut InteractionToken<Self>);
-}
-
-impl DropToken for ApplicationCommand {
-    fn drop(_t: &mut InteractionToken<Self>) {
-        // We let it fail
-        // TODO: should this be logged?
-    }
-}
-
-impl DropToken for MessageComponent {
-    fn drop(t: &mut InteractionToken<Self>) {
         // We do nothing to the message
-        let clone = InteractionToken {
-            id: t.id,
-            token: t.token.clone(),
-            application_id: t.application_id,
+        let clone = MessageInteractionToken {
+            id: self.id,
+            token: self.token.clone(),
+            application_id: self.application_id,
         };
         tokio::spawn(async move {
             let _ = clone.deferred_update(&Webhook).await;
         });
+    }
+}
+
+impl<T> Drop for InteractionToken<T> {
+    fn drop(&mut self) {
+        // We let it fail
+        // TODO: should this be logged?
     }
 }
 
@@ -186,7 +200,16 @@ impl Client for Webhook {
     }
 }
 
-impl<T: DropToken> InteractionToken<T> {
+impl<T> InteractionToken<T> {
+    fn uri_response(mut self) -> String {
+        let id = self.id;
+        let token = mem::replace(&mut self.token, String::new());
+        mem::forget(self); // do not run the destructor
+        format!("/interactions/{}/{}/callback", id.as_int(), token)
+    }
+}
+
+impl<T> MessageInteractionToken<T> {
     fn uri_response(mut self) -> String {
         let id = self.id;
         let token = mem::replace(&mut self.token, String::new());
@@ -229,7 +252,7 @@ impl Request<Webhook> for MessageResponseRequest {
 }
 
 pub trait InteractionResource: Sized {
-    type Data: 'static + DropToken;
+    type Data: 'static;
 
     fn token(self) -> InteractionToken<Self::Data>;
 
@@ -254,9 +277,45 @@ pub trait InteractionResource: Sized {
             },
         )
     }
+    #[resource((), client = Webhook)]
+    fn modal(self, data: Modal) -> HttpRequest<(), Webhook> {
+        let token = self.token();
+        HttpRequest::post(token.uri_response(), &Response { typ: 9, data })
+    }
 }
 
-pub trait ComponentInteractionResource: InteractionResource<Data = MessageComponent> {
+pub trait MessageInteractionResource: Sized {
+    type Data: 'static;
+
+    fn token(self) -> MessageInteractionToken<Self::Data>;
+
+    fn forget(self) {
+        let mut token = self.token();
+        let _ = mem::replace(&mut token.token, String::new());
+        mem::forget(token); // do not run the destructor
+    }
+
+    #[resource(InteractionResponseIdentifier, client = Webhook)]
+    fn reply(self, data: CreateReply) -> ResponseRequest {
+        let token = self.token();
+        let application_id = token.application_id;
+        let str = token.token.clone();
+
+        ResponseRequest(
+            HttpRequest::post(token.uri_response(), &Response { typ: 4, data }),
+            InteractionResponseIdentifier {
+                application_id,
+                token: str,
+                message: None,
+            },
+        )
+    }
+    #[resource((), client = Webhook)]
+    fn modal(self, data: Modal) -> HttpRequest<(), Webhook> {
+        let token = self.token();
+        HttpRequest::post(token.uri_response(), &Response { typ: 9, data })
+    }
+
     #[resource(InteractionResponseIdentifier, client = Webhook)]
     fn update(self, data: CreateUpdate) -> ResponseRequest {
         let token = self.token();
@@ -346,21 +405,33 @@ impl Endpoint for InteractionResponseIdentifier {
     }
 }
 
-impl<T: DropToken> InteractionResource for InteractionToken<T> {
+impl<T> InteractionResource for InteractionToken<T> {
     type Data = T;
     fn token(self) -> InteractionToken<T> {
         self
     }
 }
 
-impl<T: DropToken> InteractionResource for Interaction<T> {
+impl<T> InteractionResource for Interaction<T> {
     type Data = T;
     fn token(self) -> InteractionToken<T> {
         self.token
     }
 }
 
-impl<T> ComponentInteractionResource for T where T: InteractionResource<Data = MessageComponent> {}
+impl<T> MessageInteractionResource for MessageInteractionToken<T> {
+    type Data = T;
+    fn token(self) -> MessageInteractionToken<T> {
+        self
+    }
+}
+
+impl<T> MessageInteractionResource for MessageInteraction<T> {
+    type Data = T;
+    fn token(self) -> MessageInteractionToken<T> {
+        self.token
+    }
+}
 
 impl<'de> Deserialize<'de> for AnyInteraction {
     fn deserialize<D>(d: D) -> ::std::result::Result<Self, D::Error>
@@ -376,7 +447,6 @@ impl<'de> Deserialize<'de> for AnyInteraction {
         }
 
         let app_id = value.get("application_id").cloned();
-        let message = value.get("message").cloned();
 
         let typ = value.get("type").and_then(Value::as_u64).unwrap();
 
@@ -387,9 +457,13 @@ impl<'de> Deserialize<'de> for AnyInteraction {
                 data.insert("application_id".into(), app_id.unwrap());
                 AnyInteraction::Command(Interaction::deserialize(value).unwrap())
             }
-            3 => {
-                data.insert("message".into(), message.unwrap().clone());
-                AnyInteraction::Component(Interaction::deserialize(value).unwrap())
+            3 => AnyInteraction::Component(MessageInteraction::deserialize(value).unwrap()),
+            5 => {
+                if value.get("message").is_some() {
+                    AnyInteraction::MessageModal(MessageInteraction::deserialize(value).unwrap())
+                } else {
+                    AnyInteraction::Modal(Interaction::deserialize(value).unwrap())
+                }
             }
             _ => panic!("unsupported type {:?}", typ),
         })
@@ -448,8 +522,106 @@ pub struct ApplicationCommand {
 #[derive(Deserialize, Debug)]
 pub struct MessageComponent {
     pub custom_id: String,
-    pub message: Message,
 
     #[serde(default)]
     pub values: Vec<String>,
+}
+
+#[derive(Debug, Serialize_repr)]
+#[repr(u8)]
+pub enum TextStyle {
+    Short = 1,
+    Paragraph = 2,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TextActionRow {
+    #[serde(rename = "type")]
+    typ: MustBe!(1u64),
+    pub components: [TextComponent; 1],
+}
+
+impl TextActionRow {
+    pub fn new(text: TextComponent) -> Self {
+        Self {
+            typ: monostate::MustBeU64,
+            components: [text],
+        }
+    }
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
+#[derive(Debug, Serialize, Setters)]
+#[setters(strip_option)]
+pub struct TextComponent {
+    #[serde(rename = "type")]
+    #[setters(skip)]
+    typ: MustBe!(4u64),
+
+    pub custom_id: String,
+    pub style: TextStyle,
+    pub label: String,
+    pub min_length: Option<usize>,
+    pub max_length: Option<usize>,
+    #[serde(skip_serializing_if = "is_true")]
+    pub required: bool,
+    pub value: Option<String>,
+    pub placeholder: Option<String>,
+}
+
+impl TextComponent {
+    pub fn new<S1, S2>(id: S1, style: TextStyle, label: S2) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+    {
+        Self {
+            typ: monostate::MustBeU64,
+            custom_id: id.into(),
+            style,
+            label: label.into(),
+            min_length: None,
+            max_length: None,
+            required: true,
+            value: None,
+            placeholder: None,
+        }
+    }
+}
+
+impl From<TextComponent> for TextActionRow {
+    fn from(value: TextComponent) -> Self {
+        Self::new(value)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Modal {
+    pub custom_id: String,
+    pub title: String,
+    pub components: Vec<TextActionRow>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TextValueActionRow {
+    #[serde(rename = "type")]
+    _typ: MustBe!(1u64),
+    pub components: [TextValue; 1],
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TextValue {
+    #[serde(rename = "type")]
+    _typ: MustBe!(4u64),
+    pub custom_id: String,
+    pub value: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ModalSubmit {
+    pub custom_id: String,
+    pub components: Vec<TextValueActionRow>,
 }

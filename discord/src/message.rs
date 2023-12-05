@@ -1,15 +1,20 @@
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use derive_setters::Setters;
 use monostate::{MustBe, MustBeU64};
 use partial_id::Partial;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use crate::request::{Attachments, File, Indexed, IndexedOr};
+use crate::channel::ChannelResource;
+use crate::guild::Guild;
+use crate::request::{Attachments, Bot, File, Indexed, IndexedOr};
 use crate::resource::{resource, Endpoint};
 
 use super::request::HttpRequest;
+use super::request::Result;
 use super::{channel::Channel, resource::Snowflake, user::PartialUser};
 
 #[derive(Debug, Deserialize, Copy, Clone, PartialEq, Eq)]
@@ -23,6 +28,34 @@ pub struct MessageIdentifier {
 impl MessageIdentifier {
     pub fn snowflake(&self) -> Snowflake<Message> {
         self.message_id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessageLink {
+    guild_id: Snowflake<Guild>,
+    channel_id: Snowflake<Channel>,
+    message_id: Snowflake<Message>,
+}
+
+impl MessageLink {
+    pub fn message(&self) -> MessageIdentifier {
+        MessageIdentifier {
+            channel_id: self.channel_id,
+            message_id: self.message_id,
+        }
+    }
+}
+
+impl Display for MessageLink {
+    fn fmt(&self, f: &mut Formatter<'_>) -> ::std::fmt::Result {
+        write!(
+            f,
+            "https://discord.com/channels/{}/{}/{}",
+            self.guild_id.as_int(),
+            self.channel_id.as_int(),
+            self.message_id.as_int()
+        )
     }
 }
 
@@ -287,6 +320,7 @@ impl Endpoint for MessageIdentifier {
     }
 }
 
+#[async_trait]
 pub trait MessageResource: Sized {
     fn endpoint(&self) -> MessageIdentifier;
 
@@ -309,6 +343,16 @@ pub trait MessageResource: Sized {
             format!("{}/threads", self.endpoint().uri()),
             &CreateThread { name },
         )
+    }
+
+    async fn get_link(&self, client: &Bot) -> Result<MessageLink> {
+        let id = self.endpoint();
+        let guild_id = id.channel_id.get(client).await?.guild_id;
+        Ok(MessageLink {
+            guild_id,
+            channel_id: id.channel_id,
+            message_id: id.message_id,
+        })
     }
 }
 

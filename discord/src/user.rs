@@ -18,7 +18,7 @@ pub struct User {
 
 impl Display for Snowflake<User> {
     fn fmt(&self, f: &mut Formatter<'_>) -> ::std::fmt::Result {
-        f.write_fmt(format_args!("<@{}>", self.as_int()))
+        write!(f, "<@{}>", self.as_int())
     }
 }
 

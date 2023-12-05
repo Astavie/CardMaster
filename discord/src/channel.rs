@@ -4,6 +4,7 @@ use std::write;
 use partial_id::Partial;
 use serde::Deserialize;
 
+use crate::guild::Guild;
 use crate::resource::{resource, Endpoint};
 
 use super::{
@@ -16,6 +17,7 @@ use super::{
 #[derive(Debug, Deserialize)]
 pub struct Channel {
     pub id: Snowflake<Channel>,
+    pub guild_id: Snowflake<Guild>,
     pub name: Option<String>,
 }
 
