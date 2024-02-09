@@ -1,5 +1,4 @@
 use discord::{
-    escape_string,
     message::{ButtonStyle, Field},
     resource::Snowflake,
     user::User,
@@ -41,10 +40,8 @@ impl Ingame {
                         .join("\n"),
                 ));
 
-                msg.fields.push(Field::new(
-                    "Prompt",
-                    escape_string(&self.packs[self.prompt].to_string().replace("\\n", "\n ")),
-                ));
+                msg.fields
+                    .push(Field::new("Prompt", self.prompt.display(&self.packs, true)));
 
                 msg.append_action(Action::ShowHand, ButtonStyle::Primary, "Show Hand".into());
                 None
@@ -82,7 +79,7 @@ impl Ingame {
                         .iter()
                         .copied()
                         .enumerate()
-                        .map(|(i, c)| format!("{}. ``{}``", i + 1, self.packs[c]))
+                        .map(|(i, c)| format!("{}. ``{}``", i + 1, c.display(&self.packs, false)))
                         .collect::<Vec<_>>()
                         .join("\n"),
                 ));

@@ -3,7 +3,7 @@ use std::marker::ConstParamTy;
 use std::ops::Index;
 use std::sync::Arc;
 use std::{fmt::Display, fs::read_to_string};
-use std::{matches, mem, println};
+use std::{matches, mem};
 
 use async_trait::async_trait;
 use discord::escape_string;
@@ -58,15 +58,6 @@ impl CardData {
     }
 }
 
-impl Display for CardData {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            CardData::Raw(text) => text.fmt(f),
-            CardData::Full { text, .. } => text.fmt(f),
-        }
-    }
-}
-
 #[derive(Deserialize)]
 pub struct PackData {
     black: Vec<CardData>,
@@ -83,9 +74,42 @@ pub enum CardType {
 pub struct Card<const TYPE: CardType> {
     pack: u32,
     card: u32,
+    player: PlayerKind,
 }
 
 impl<const C: CardType> Card<C> {
+    pub fn display(self, packs: &Packs, escape: bool) -> String {
+        if escape {
+            escape_string(
+                &match &packs[self] {
+                    CardData::Raw(text) => text,
+                    CardData::Full { text, .. } => text,
+                }
+                .replace("\\n", "\n "),
+            )
+            .replace("{}", &self.player.to_string())
+        } else {
+            let prompt = &match &packs[self] {
+                CardData::Raw(text) => text,
+                CardData::Full { text, .. } => text,
+            }
+            .replace("\\n", "\n")
+            .replace("\n", "");
+
+            let mut prompt_slice = prompt.as_str();
+            let mut filled = String::with_capacity(prompt_slice.len());
+
+            while let Some(pos) = prompt_slice.find("{}") {
+                // trim spaces around blank
+                filled.push_str(prompt_slice[..pos].trim_end());
+                prompt_slice = prompt_slice[pos + 2..].trim_start();
+
+                filled.push_str(&format!("`` {} ``", self.player));
+            }
+            filled.push_str(prompt_slice);
+            filled
+        }
+    }
     pub fn is_filled(
         self,
         packs: &Packs,
@@ -115,10 +139,9 @@ impl<const C: CardType> Card<C> {
         packs: &Packs,
         white: &mut impl Iterator<Item = Option<Card<{ CardType::White }>>>,
     ) -> String {
-        let prompt: String = packs[self].to_string().into();
         let prompt = match C {
-            CardType::White => prompt.trim_end_matches('.').into(),
-            CardType::Black => escape_string(&prompt.replace("\\n", "\n ")),
+            CardType::White => self.display(packs, false).trim_end_matches('.').into(),
+            CardType::Black => self.display(packs, true),
         };
 
         let mut prompt_slice = prompt.as_str();
@@ -189,7 +212,7 @@ impl<const C: CardType> Index<Card<C>> for Packs {
     }
 }
 
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum PlayerKind {
     User(Snowflake<User>),
     Rando(usize),
@@ -199,7 +222,7 @@ impl Display for PlayerKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             PlayerKind::User(u) => u.fmt(f),
-            PlayerKind::Rando(i) => write!(f, "`Rando Cardrissian #{}`", i + 1),
+            PlayerKind::Rando(i) => write!(f, "``Rando Cardrissian #{}``", i + 1),
         }
     }
 }
@@ -226,48 +249,55 @@ impl Player {
             .copied()
             .map(|i| i.map(|i| self.hand[i]))
     }
-    pub fn draw(
-        &mut self,
-        packs: &mut Packs,
-        max: usize,
-        prompt: Card<{ CardType::Black }>,
-    ) -> bool {
-        // remove selected cards
-        let mut selected = std::mem::replace(&mut self.selected, Vec::new());
-        selected.sort_unstable_by(|a, b| b.cmp(a));
-        for index in selected {
-            if let Some(index) = index {
-                self.hand.remove(index);
-            }
-        }
-        // draw new cards
-        for _ in 0..max - self.hand.len() {
-            self.hand.push(match packs.draw_white() {
-                Some(c) => c,
-                None => return false,
-            });
-        }
-        // if rando, give answer immediately
-        if matches!(self.kind, PlayerKind::Rando(_)) {
-            fn choose(raw: &mut Vec<usize>) -> Option<usize> {
-                let i = (0..raw.len()).choose(&mut thread_rng())?;
-                Some(raw.swap_remove(i))
-            }
+}
 
-            let mut indices: Vec<_> = (0..max).collect();
-            while !prompt.is_filled(packs, self.selected()) {
-                self.selected.push(Some(match choose(&mut indices) {
-                    Some(i) => i,
-                    None => return false,
-                }))
-            }
+pub fn draw(
+    players: &mut [Player],
+    num: usize,
+    packs: &mut Packs,
+    max: usize,
+    prompt: Card<{ CardType::Black }>,
+) -> bool {
+    let player = &mut players[num];
+
+    // remove selected cards
+    let mut selected = std::mem::replace(&mut player.selected, Vec::new());
+    selected.sort_unstable_by(|a, b| b.cmp(a));
+    for index in selected {
+        if let Some(index) = index {
+            player.hand.remove(index);
         }
-        true
     }
+    // draw new cards
+    for _ in 0..max - player.hand.len() {
+        let draw_white = packs.draw_white(players);
+        let player = &mut players[num];
+        player.hand.push(match draw_white {
+            Some(c) => c,
+            None => return false,
+        });
+    }
+    // if rando, give answer immediately
+    let player = &mut players[num];
+    if matches!(player.kind, PlayerKind::Rando(_)) {
+        fn choose(raw: &mut Vec<usize>) -> Option<usize> {
+            let i = (0..raw.len()).choose(&mut thread_rng())?;
+            Some(raw.swap_remove(i))
+        }
+
+        let mut indices: Vec<_> = (0..max).collect();
+        while !prompt.is_filled(packs, player.selected()) {
+            player.selected.push(Some(match choose(&mut indices) {
+                Some(i) => i,
+                None => return false,
+            }))
+        }
+    }
+    true
 }
 
 impl Packs {
-    pub fn draw_black(&mut self) -> Option<Card<{ CardType::Black }>> {
+    pub fn draw_black(&mut self, players: &[Player]) -> Option<Card<{ CardType::Black }>> {
         let start_indices = self
             .0
             .iter()
@@ -294,12 +324,14 @@ impl Packs {
             .unwrap();
         let card = random - start_index;
 
+        let player = players[rng.gen_range(0..players.len())].kind;
         Some(Card {
             pack: pack as u32,
             card: card as u32,
+            player,
         })
     }
-    pub fn draw_white(&mut self) -> Option<Card<{ CardType::White }>> {
+    pub fn draw_white(&mut self, players: &[Player]) -> Option<Card<{ CardType::White }>> {
         let start_indices = self
             .0
             .iter()
@@ -326,9 +358,11 @@ impl Packs {
             .unwrap();
         let card = random - start_index;
 
+        let player = players[rng.gen_range(0..players.len())].kind;
         Some(Card {
             pack: pack as u32,
             card: card as u32,
+            player,
         })
     }
 }
@@ -419,7 +453,7 @@ impl Game for CAH {
 
                 let mut players = players.into_iter().map(Player::new).collect::<Vec<_>>();
 
-                let prompt = match packs.draw_black() {
+                let prompt = match packs.draw_black(&players) {
                     Some(c) => c,
                     None => {
                         return ActionResponse::Error(GameMessage::new(
@@ -432,8 +466,8 @@ impl Game for CAH {
                     }
                 };
 
-                for player in players.iter_mut() {
-                    if !player.draw(&mut packs, s.cards as usize, prompt) {
+                for num in 0..players.len() {
+                    if !draw(&mut players, num, &mut packs, s.cards as usize, prompt) {
                         return ActionResponse::Error(GameMessage::new(
                             vec![Field::new(
                                 "Error",
@@ -502,14 +536,14 @@ impl Game for CAH {
                 }
 
                 // new prompt
-                i.prompt = match i.packs.draw_black() {
+                i.prompt = match i.packs.draw_black(&i.players) {
                     Some(c) => c,
                     None => todo!("no black cards"),
                 };
 
                 // draw cards
-                for player in i.players.iter_mut() {
-                    if !player.draw(&mut i.packs, i.cards, i.prompt) {
+                for num in 0..i.players.len() {
+                    if !draw(&mut i.players, num, &mut i.packs, i.cards, i.prompt) {
                         todo!("no white cards");
                     }
                 }
