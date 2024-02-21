@@ -517,7 +517,7 @@ impl Game for CAH {
                     *self = CAH::Write(ingame);
                 }
 
-                ActionResponse::NextMain
+                ActionResponse::NextMain(true)
             }
             CAH::Write(i) => match action {
                 Action::ShowHand => ActionResponse::Reply(Panel::Hand),
@@ -539,7 +539,7 @@ impl Game for CAH {
                                 },
                             )
                         });
-                        ActionResponse::NextMain
+                        ActionResponse::NextMain(false)
                     } else {
                         ActionResponse::EditMain
                     }
@@ -593,7 +593,7 @@ impl Game for CAH {
                     });
                 }
 
-                ActionResponse::NextMain
+                ActionResponse::NextMain(true)
             }
         }
     }

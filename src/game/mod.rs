@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures_util::future::join_all;
 
 use discord::{
-    channel::ChannelResource,
+    channel::{Channel, ChannelResource},
     interaction::{
         ApplicationCommand, CreateReply, CreateUpdate, InteractionResource,
         InteractionResponseIdentifier, InteractionToken, MessageComponent, MessageInteraction,
@@ -80,6 +80,8 @@ pub struct GameUI {
     user: Snowflake<User>,
 
     replies: HashMap<Snowflake<Message>, (&'static str, InteractionResponseIdentifier)>,
+
+    thread: Option<Snowflake<Channel>>,
 }
 
 #[derive(Default)]
@@ -107,6 +109,9 @@ impl From<Message> for GameMessage {
 }
 
 impl GameUI {
+    pub fn is_in_thread(&self) -> bool {
+        self.thread.is_some()
+    }
     pub async fn edit(&self, id: Snowflake<Message>, msg: GameMessage) {
         if id == self.msg_id {
             // sign if we are updating the base message
@@ -198,6 +203,38 @@ impl GameUI {
             .unwrap();
         }
     }
+    pub async fn update_reply(
+        &mut self,
+        i: MessageInteraction<MessageComponent>,
+        msg: GameMessage,
+    ) {
+        if i.message.id.snowflake() == self.msg_id {
+            // sign if we are updating the base message
+            let interaction = i
+                .reply(
+                    &Webhook,
+                    CreateReply::default()
+                        .embeds(vec![Embed::default()
+                            .author(Author::new(self.name))
+                            .color(self.color)
+                            .fields(msg.fields)])
+                        .components(msg.components),
+                )
+                .await
+                .unwrap();
+            self.msg_id = interaction.get(&Webhook).await.unwrap().id.snowflake();
+            self.msg = Some(interaction);
+        } else {
+            i.reply(
+                &Webhook,
+                CreateReply::default()
+                    .embeds(vec![Embed::default().fields(msg.fields)])
+                    .components(msg.components),
+            )
+            .await
+            .unwrap();
+        }
+    }
     pub async fn delete_replies(&mut self) {
         let _ = join_all(self.replies.drain().map(|(_, (_, id))| id.delete(&Webhook))).await;
     }
@@ -268,7 +305,7 @@ where
                         ui.edit(ui.msg_id, msg).await;
                         false
                     }
-                    ActionResponse::NextMain => {
+                    ActionResponse::NextMain(prefer_reply) => {
                         // delete replies
                         ui.delete_replies().await;
 
@@ -276,7 +313,11 @@ where
                         let mut msg = GameMessage::default();
                         self.create_panel(&mut msg, &Event::none(), panel, ui.user);
                         if interaction.message.id.snowflake() == ui.msg_id {
-                            ui.update(interaction, msg).await;
+                            if prefer_reply && ui.is_in_thread() {
+                                ui.update_reply(interaction, msg).await;
+                            } else {
+                                ui.update(interaction, msg).await;
+                            }
                         } else {
                             ui.edit(ui.msg_id, msg).await;
                         }
@@ -354,7 +395,7 @@ macro_rules! enum_str {
 
 pub enum ActionResponse<Panel> {
     EditMain,
-    NextMain,
+    NextMain(bool),
 
     Reply(Panel),
 
@@ -401,7 +442,7 @@ pub trait Game: Sized + 'static {
         let mut msg = GameMessage::default();
         me.create_panel(&mut msg, &Event::none(), Self::Panel::default(), user_id);
 
-        let (id, msg) = match thread {
+        let (id, msg, thread) = match thread {
             Some(discord) => {
                 // TODO: close thread on end
                 // TODO: give thread better name
@@ -428,7 +469,7 @@ pub trait Game: Sized + 'static {
                             .components(msg.components),
                     )
                     .await?;
-                (None, msg)
+                (None, msg, Some(channel.id))
             }
             None => {
                 let id = token
@@ -443,7 +484,7 @@ pub trait Game: Sized + 'static {
                     )
                     .await?;
                 let msg = id.get(&Webhook).await?;
-                (Some(id), msg)
+                (Some(id), msg, None)
             }
         };
 
@@ -457,6 +498,7 @@ pub trait Game: Sized + 'static {
                 msg_id: msg.id.snowflake(),
                 panel: Self::Panel::default().into(),
                 replies: HashMap::new(),
+                thread,
             },
             game: Box::new(me),
         })
