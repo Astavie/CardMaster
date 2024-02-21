@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::fmt::{self, Formatter};
 use std::marker::ConstParamTy;
 use std::ops::Index;
@@ -6,9 +7,9 @@ use std::{fmt::Display, fs::read_to_string};
 use std::{matches, mem};
 
 use async_trait::async_trait;
-use discord::escape_string;
 use discord::message::Field;
 use discord::{resource::Snowflake, user::User};
+use discord::{DiscordFormatter, DisplayDiscord};
 use rand::seq::IteratorRandom;
 use rand::{thread_rng, Rng};
 use serde::Deserialize;
@@ -78,36 +79,10 @@ pub struct Card<const TYPE: CardType> {
 }
 
 impl<const C: CardType> Card<C> {
-    pub fn display(self, packs: &Packs, escape: bool) -> String {
-        if escape {
-            escape_string(
-                &match &packs[self] {
-                    CardData::Raw(text) => text,
-                    CardData::Full { text, .. } => text,
-                }
-                .replace("\\n", "\n "),
-            )
-            .replace("{}", &self.player.to_string())
-        } else {
-            let prompt = &match &packs[self] {
-                CardData::Raw(text) => text,
-                CardData::Full { text, .. } => text,
-            }
-            .replace("\\n", "\n")
-            .replace("\n", "");
-
-            let mut prompt_slice = prompt.as_str();
-            let mut filled = String::with_capacity(prompt_slice.len());
-
-            while let Some(pos) = prompt_slice.find("{}") {
-                // trim spaces around blank
-                filled.push_str(prompt_slice[..pos].trim_end());
-                prompt_slice = prompt_slice[pos + 2..].trim_start();
-
-                filled.push_str(&format!("`` {} ``", self.player));
-            }
-            filled.push_str(prompt_slice);
-            filled
+    pub fn text(self, packs: &Packs) -> &str {
+        match &packs[self] {
+            CardData::Raw(text) => text,
+            CardData::Full { text, .. } => text,
         }
     }
     pub fn is_filled(
@@ -139,62 +114,84 @@ impl<const C: CardType> Card<C> {
         packs: &Packs,
         white: &mut impl Iterator<Item = Option<Card<{ CardType::White }>>>,
     ) -> String {
-        let prompt = match C {
-            CardType::White => self.display(packs, false).trim_end_matches('.').into(),
-            CardType::Black => self.display(packs, true),
-        };
-
-        let mut prompt_slice = prompt.as_str();
-        let mut filled = String::with_capacity(prompt.len());
-
-        while let Some(pos) = prompt_slice.find('_') {
-            match white.next() {
-                Some(Some(c)) => {
-                    match C {
-                        CardType::White => {
-                            // trim spaces around blank
-                            filled.push_str(prompt_slice[..pos].trim_end());
-                            prompt_slice = prompt_slice[pos + 1..].trim_start();
-
-                            filled.push_str(format!("`` ``{}`` ``", c.fill(packs, white)).as_str());
-                        }
-                        CardType::Black => {
-                            // also remove backslash
-                            filled.push_str(&prompt_slice[..pos - 1]);
-                            prompt_slice = &prompt_slice[pos + 1..];
-
-                            filled.push_str(format!("``{}``", c.fill(packs, white)).as_str());
-                        }
-                    }
-                }
-                _ => {
-                    filled.push_str(&prompt_slice[..pos + 1]);
-                    prompt_slice = &prompt_slice[pos + 1..];
-                }
-            }
-        }
-        filled.push_str(prompt_slice);
+        let mut buf = String::new();
+        let mut fmt = DiscordFormatter::new(&mut buf);
+        self.fmt(packs, white, &mut fmt).unwrap();
+        buf
+    }
+    pub fn fmt(
+        self,
+        packs: &Packs,
+        white: &mut impl Iterator<Item = Option<Card<{ CardType::White }>>>,
+        fmt: &mut DiscordFormatter<'_>,
+    ) -> fmt::Result {
+        let mut prompt = self.text(packs);
 
         match C {
             CardType::White => {
-                // remove empty quotes
-                filled = filled
-                    .trim_start_matches(&[' ', '`'])
-                    .trim_end_matches(&[' ', '`'])
-                    .into();
+                prompt = prompt.trim_end_matches('.');
+                fmt.start_code()?;
+            }
+            CardType::Black => {}
+        }
+
+        let inner_start = |fmt: &mut DiscordFormatter| match C {
+            CardType::White => fmt.end_code(),
+            CardType::Black => write!(fmt, " "),
+        };
+
+        let inner_end = |fmt: &mut DiscordFormatter| match C {
+            CardType::White => fmt.start_code(),
+            CardType::Black => write!(fmt, " "),
+        };
+
+        while let Some(pos) = prompt.find(['_', '{']) {
+            // trim spaces around blank
+            let before = prompt[..pos].trim_end();
+
+            let underscore = prompt.chars().nth(pos).unwrap() == '_';
+            let size = if underscore { 1 } else { 2 };
+            let after = prompt[pos + size..].trim_start();
+
+            write!(fmt, "{}", before)?;
+
+            if underscore {
+                match white.next() {
+                    Some(Some(c)) => {
+                        inner_start(fmt)?;
+                        c.fmt(packs, white, fmt)?;
+                        inner_end(fmt)?;
+                    }
+                    _ => {
+                        write!(fmt, "{}", &prompt[pos..pos + size])?;
+                    }
+                }
+            } else {
+                inner_start(fmt)?;
+                DisplayDiscord::fmt(&self.player, fmt)?;
+                inner_end(fmt)?;
+            }
+
+            prompt = after;
+        }
+
+        write!(fmt, "{}", prompt)?;
+
+        match C {
+            CardType::White => {
+                fmt.end_code()?;
             }
             CardType::Black => {
-                let extra_cards = packs[self].extra_blanks();
-                for _ in 0..extra_cards {
+                for _ in 0..packs[self].extra_blanks() {
                     if let Some(Some(c)) = white.next() {
-                        filled.push_str(format!(" ``{}``", c.fill(packs, white)).as_str());
+                        write!(fmt, " ")?;
+                        c.fmt(packs, white, fmt)?;
                     }
                 }
             }
         }
 
-        println!("{}", filled);
-        filled
+        Ok(())
     }
 }
 
@@ -223,6 +220,25 @@ impl Display for PlayerKind {
         match self {
             PlayerKind::User(u) => u.fmt(f),
             PlayerKind::Rando(i) => write!(f, "``Rando Cardrissian #{}``", i + 1),
+        }
+    }
+}
+
+impl DisplayDiscord for PlayerKind {
+    fn fmt(&self, f: &mut discord::DiscordFormatter<'_>) -> fmt::Result {
+        match self {
+            PlayerKind::User(u) => {
+                f.unescaped().write_str("<@")?;
+                write!(f, "{}", u.as_int())?;
+                f.unescaped().write_str(">")?;
+                Ok(())
+            }
+            PlayerKind::Rando(i) => {
+                f.start_code()?;
+                write!(f, "Rando Cardrissian #{}", i + 1)?;
+                f.end_code()?;
+                Ok(())
+            }
         }
     }
 }
