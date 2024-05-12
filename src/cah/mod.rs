@@ -149,7 +149,7 @@ impl<const C: CardType> Card<C> {
             // trim spaces around blank
             let before = prompt[..pos].trim_end();
 
-            let underscore = prompt.chars().nth(pos).unwrap() == '_';
+            let underscore = prompt.as_bytes()[pos] == b'_';
             let size = if underscore { 1 } else { 2 };
             let after = prompt[pos + size..].trim_start();
 

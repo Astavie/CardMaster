@@ -43,7 +43,7 @@ impl Ingame {
 
                 msg.fields.push(Field::new(
                     "Prompt",
-                    escape_string(self.prompt.text(&self.packs)),
+                    self.prompt.fill(&self.packs, &mut std::iter::empty()),
                 ));
 
                 msg.append_action(Action::ShowHand, ButtonStyle::Primary, "Show Hand".into());
@@ -82,7 +82,13 @@ impl Ingame {
                         .iter()
                         .copied()
                         .enumerate()
-                        .map(|(i, c)| format!("{}. ``{}``", i + 1, c.text(&self.packs)))
+                        .map(|(i, c)| {
+                            format!(
+                                "{}. ``{}``",
+                                i + 1,
+                                c.fill(&self.packs, &mut std::iter::empty())
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .join("\n"),
                 ));
